@@ -10,7 +10,6 @@ import lombok.Getter;
 @AllArgsConstructor
 public class ModelResponse {
     private String id;
-
     private String object;
 
     @JsonProperty("owned_by")

@@ -21,9 +21,7 @@ public class ChatCompletionRequest {
     private List<ChatMessage> messages;
 
     private Boolean stream = false;
-
     private Double temperature;
-
     private Integer maxTokens;
 
 }

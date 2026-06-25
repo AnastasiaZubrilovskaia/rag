@@ -9,10 +9,7 @@ import java.util.UUID;
 @Builder
 public class DocumentInfo {
     private UUID id;
-
     private String fileName;
-
     private DocumentStatus status;
-
     private Integer chunkCount;
 }
