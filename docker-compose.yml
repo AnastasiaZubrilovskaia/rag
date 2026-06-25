@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  app:
+    build: .
+    environment:
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - qdrant
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    depends_on:
+      - app
+
+volumes:
+  qdrant-data:
