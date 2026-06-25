@@ -12,10 +12,7 @@ import java.util.UUID;
 @AllArgsConstructor
 public class DocumentResponse {
     private UUID id;
-
     private String fileName;
-
     private String status;
-
     private Integer chunkCount;
 }
