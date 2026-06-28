@@ -4,7 +4,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -15,21 +17,22 @@ public class DocumentIndexingService {
 
     public int indexDocument(UUID documentId, String fileName, String content) {
         List<String> chunks = chunkingService.chunk(content);
+        List<Document> documents = new ArrayList<>();
 
-        List<Document> documents = chunks.stream()
-                .map(chunk -> createDocument(
-                        documentId,
-                        fileName,
-                        chunk
-                ))
-                .toList();
+        for (int i = 0; i < chunks.size(); i++) {
+            documents.add(createDocument(documentId, fileName, chunks.get(i), i));
+        }
 
         vectorStoreService.saveDocuments(documents);
-
-        return chunks.size();
+        return documents.size();
     }
 
-    private Document createDocument(UUID documentId, String fileName, String chunk) {
-        return new Document(chunk, java.util.Map.of("documentId", documentId.toString(), "fileName", fileName));
+    private Document createDocument(UUID documentId, String fileName, String chunk, int position) {
+        return new Document(chunk, Map.of(
+                        "documentId", documentId.toString(),
+                        "fileName", fileName,
+                        "position", position
+                )
+        );
     }
 }

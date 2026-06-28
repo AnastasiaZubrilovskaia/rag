@@ -18,7 +18,7 @@ public class ModelController {
     public ResponseEntity<ModelListResponse> getModels() {
 
         ModelResponse model = new ModelResponse(
-                "glm-4.7",
+                "qwen2.5:7b",
                 "model",
                 "local"
         );

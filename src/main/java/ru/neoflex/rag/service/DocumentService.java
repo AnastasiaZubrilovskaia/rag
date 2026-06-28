@@ -18,25 +18,68 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DocumentService {
     private final List<DocumentParser> parsers;
     private final DocumentIndexingService documentIndexingService;
+    private final VectorStoreService vectorStoreService;
+
+    /**
+     * Пока используем in-memory хранилище.
+     * Позже его можно заменить на БД без изменения контроллера.
+     */
     private final Map<UUID, DocumentInfo> documents = new ConcurrentHashMap<>();
 
     public DocumentResponse upload(MultipartFile file) {
-        DocumentParser parser = getParser(file.getOriginalFilename());
-        String text = parser.parse(file);
         UUID documentId = UUID.randomUUID();
 
-        int chunkCount = documentIndexingService.indexDocument(documentId, file.getOriginalFilename(), text);
-
         DocumentInfo documentInfo = DocumentInfo.builder()
+                .id(documentId)
+                .fileName(file.getOriginalFilename())
+                .status(DocumentStatus.PROCESSING)
+                .chunkCount(0)
+                .build();
+
+        documents.put(documentId, documentInfo);
+
+        try {
+            processDocument(documentId, file);
+        } catch (Exception e) {
+
+            documentInfo = DocumentInfo.builder()
+                    .id(documentInfo.getId())
+                    .fileName(documentInfo.getFileName())
+                    .status(DocumentStatus.FAILED)
+                    .chunkCount(0)
+                    .build();
+
+            documents.put(documentId, documentInfo);
+            throw e;
+        }
+
+        return mapToResponse(documents.get(documentId));
+    }
+
+    /**
+     * Сейчас выполняется синхронно.
+     * Позже достаточно будет заменить вызов:
+     * CompletableFuture.runAsync(() -> processDocument(...))
+     * и сервис станет асинхронным.
+     */
+    private void processDocument(UUID documentId, MultipartFile file) {
+        DocumentParser parser = getParser(file.getOriginalFilename());
+        String text = parser.parse(file);
+
+        int chunkCount = documentIndexingService.indexDocument(
+                documentId,
+                file.getOriginalFilename(),
+                text
+        );
+
+        DocumentInfo completed = DocumentInfo.builder()
                 .id(documentId)
                 .fileName(file.getOriginalFilename())
                 .status(DocumentStatus.COMPLETED)
                 .chunkCount(chunkCount)
                 .build();
 
-        documents.put(documentId, documentInfo);
-
-        return mapToResponse(documentInfo);
+        documents.put(documentId, completed);
     }
 
     public List<DocumentResponse> getDocuments() {
@@ -48,18 +91,18 @@ public class DocumentService {
 
     public void deleteDocument(UUID id) {
         documents.remove(id);
+
+        vectorStoreService.deleteDocument(id);
     }
 
     private DocumentParser getParser(String fileName) {
-
         return parsers.stream()
                 .filter(parser -> parser.supports(fileName))
                 .findFirst()
-                .orElseThrow(
-                        () -> new IllegalArgumentException(
-                                "Unsupported file type"
-                        )
-                );
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Unsupported file type: " + fileName
+                        ));
     }
 
     private DocumentResponse mapToResponse(DocumentInfo documentInfo) {
