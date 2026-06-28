@@ -9,19 +9,20 @@ spring:
 
   ai:
     ollama:
-      base-url: https://ollama.com
-      api-key: ${OLLAMA_API_KEY}
+      base-url: http://ollama:11434
       chat:
         options:
-          model: glm-4.7
+          model: qwen2.5:7b
+          temperature: 0.2
       embedding:
         options:
           model: nomic-embed-text
     vectorstore:
       qdrant:
         host: qdrant
-        port: 6333
+        port: 6334
         collection-name: rag-documents
+        initialize-schema: true
 
 springdoc:
   swagger-ui:
@@ -33,3 +34,8 @@ rag:
   search:
     top-k: 5
     similarity-threshold: 0.7
+
+
+logging:
+  level:
+    org.springframework.ai: DEBUG
