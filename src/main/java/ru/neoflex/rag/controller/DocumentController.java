@@ -17,8 +17,7 @@ public class DocumentController {
     private final DocumentService documentService;
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public DocumentResponse upload(@RequestParam("file") MultipartFile file
-    ) {
+    public DocumentResponse upload(@RequestParam("file") MultipartFile file) {
         return documentService.upload(file);
     }
 
