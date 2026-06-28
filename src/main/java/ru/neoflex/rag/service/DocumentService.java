@@ -1,98 +1,78 @@
 package ru.neoflex.rag.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import ru.neoflex.rag.model.entity.DocumentInfo;
-import ru.neoflex.rag.model.entity.DocumentStatus;
 import ru.neoflex.rag.model.response.DocumentResponse;
 import ru.neoflex.rag.parser.DocumentParser;
+import ru.neoflex.rag.repository.QdrantDocumentRepository;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DocumentService {
     private final List<DocumentParser> parsers;
     private final DocumentIndexingService documentIndexingService;
-    private final VectorStoreService vectorStoreService;
+    private final QdrantDocumentRepository documentRepository;
 
     /**
-     * Пока используем in-memory хранилище.
-     * Позже его можно заменить на БД без изменения контроллера.
+     * Загрузка документа
      */
-    private final Map<UUID, DocumentInfo> documents = new ConcurrentHashMap<>();
-
     public DocumentResponse upload(MultipartFile file) {
         UUID documentId = UUID.randomUUID();
+        String fileName = file.getOriginalFilename();
 
-        DocumentInfo documentInfo = DocumentInfo.builder()
-                .id(documentId)
-                .fileName(file.getOriginalFilename())
-                .status(DocumentStatus.PROCESSING)
-                .chunkCount(0)
-                .build();
-
-        documents.put(documentId, documentInfo);
+        log.info("Starting upload: {}", fileName);
 
         try {
             processDocument(documentId, file);
+            DocumentInfo docInfo = documentRepository.getAllDocuments().stream()
+                    .filter(doc -> doc.getId().equals(documentId))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Document not found after processing"));
+
+            log.info("Upload completed: {}, chunks: {}", fileName, docInfo.getChunkCount());
+            return mapToResponse(docInfo);
+
         } catch (Exception e) {
-
-            documentInfo = DocumentInfo.builder()
-                    .id(documentInfo.getId())
-                    .fileName(documentInfo.getFileName())
-                    .status(DocumentStatus.FAILED)
-                    .chunkCount(0)
-                    .build();
-
-            documents.put(documentId, documentInfo);
-            throw e;
+            log.error("Upload failed: {}", fileName, e);
+            throw new RuntimeException("Failed to process document: " + e.getMessage(), e);
         }
-
-        return mapToResponse(documents.get(documentId));
     }
 
-    /**
-     * Сейчас выполняется синхронно.
-     * Позже достаточно будет заменить вызов:
-     * CompletableFuture.runAsync(() -> processDocument(...))
-     * и сервис станет асинхронным.
-     */
     private void processDocument(UUID documentId, MultipartFile file) {
         DocumentParser parser = getParser(file.getOriginalFilename());
         String text = parser.parse(file);
 
-        int chunkCount = documentIndexingService.indexDocument(
+        documentIndexingService.indexDocument(
                 documentId,
                 file.getOriginalFilename(),
                 text
         );
-
-        DocumentInfo completed = DocumentInfo.builder()
-                .id(documentId)
-                .fileName(file.getOriginalFilename())
-                .status(DocumentStatus.COMPLETED)
-                .chunkCount(chunkCount)
-                .build();
-
-        documents.put(documentId, completed);
     }
 
+    /**
+     * Список документов из Qdrant
+     */
     public List<DocumentResponse> getDocuments() {
-        return documents.values()
-                .stream()
+        List<DocumentInfo> documents = documentRepository.getAllDocuments();
+        log.info("Retrieved {} documents", documents.size());
+        return documents.stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
+    /**
+     * Удаление документа из Qdrant
+     */
     public void deleteDocument(UUID id) {
-        documents.remove(id);
-
-        vectorStoreService.deleteDocument(id);
+        documentRepository.deleteByDocumentId(id);
+        log.info("Document deleted: {}", id);
     }
 
     private DocumentParser getParser(String fileName) {
@@ -100,18 +80,15 @@ public class DocumentService {
                 .filter(parser -> parser.supports(fileName))
                 .findFirst()
                 .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Unsupported file type: " + fileName
-                        ));
+                        new IllegalArgumentException("Unsupported file type: " + fileName));
     }
 
-    private DocumentResponse mapToResponse(DocumentInfo documentInfo) {
-
+    private DocumentResponse mapToResponse(DocumentInfo docInfo) {
         return DocumentResponse.builder()
-                .id(documentInfo.getId())
-                .fileName(documentInfo.getFileName())
-                .status(documentInfo.getStatus().name())
-                .chunkCount(documentInfo.getChunkCount())
+                .id(docInfo.getId())
+                .fileName(docInfo.getFileName())
+                .status(docInfo.getStatus().name())
+                .chunkCount(docInfo.getChunkCount())
                 .build();
     }
 }
