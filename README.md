@@ -10,12 +10,16 @@ RAG-сервис для загрузки документов, их индекс
 
 ## Возможности
 
-- Загрузка документов (`.txt`, `.md`)
-- Разбиение документов на чанки
+- Загрузка документов (`.txt`, `.md`, `.pdf`, `.docx`)
+- Разбиение документов на чанки с настраиваемым размером и перекрытием
 - Генерация эмбеддингов через Ollama (`nomic-embed-text`)
+- Кэширование эмбеддингов для повторного использования
 - Хранение документов и эмбеддингов в Qdrant
 - Семантический поиск релевантных фрагментов
 - Генерация ответов на основе найденного контекста (RAG)
+- Потоковая передача ответов (stream=true, SSE)
+- Асинхронная обработка документов (CompletableFuture)
+- Веб-поиск как fallback при недостатке контекста (SearXNG)
 - Удаление документов из Qdrant
 - OpenAI-совместимый REST API
 - Swagger/OpenAPI документация
@@ -30,10 +34,13 @@ RAG-сервис для загрузки документов, их индекс
 | Java | 21 |
 | Spring Boot | 3.4.10 |
 | Spring AI | 1.0.3 |
-| Qdrant Java Client | 1.15.0 |
+| Qdrant Java Client | 1.12.0 |
 | Springdoc OpenAPI | 2.8.9 |
+| Apache PDFBox | 3.0.3 |
+| Apache POI | 5.3.0 |
 | Ollama | latest |
 | Qdrant | latest |
+| SearXNG | latest |
 | Open WebUI | latest |
 | Docker / Docker Compose | latest |
 
@@ -75,6 +82,7 @@ docker compose up --build
 | Open WebUI | http://localhost:3000 |
 | Ollama | http://localhost:11434 |
 | Qdrant Dashboard | http://localhost:6333/dashboard |
+| SearXNG| http://localhost:8888 |
 
 ---
 
@@ -142,6 +150,8 @@ multipart/form-data
 
 - `.txt`
 - `.md`
+- `.pdf`
+- `.docx`
 
 ### Ответ
 
@@ -197,7 +207,7 @@ DELETE /api/documents/{id}
 POST /v1/chat/completions
 ```
 
-### Пример запроса
+### Пример запроса (обычный режим)
 
 ```json
 {
@@ -214,7 +224,7 @@ POST /v1/chat/completions
 }
 ```
 
-### Пример ответа
+### Пример ответа (обычный режим)
 
 ```json
 {
@@ -239,8 +249,42 @@ POST /v1/chat/completions
   }
 }
 ```
+### Пример запроса (потоковый режим)
+
+```json
+{
+  "model": "qwen2.5:7b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Что такое Spring Boot?"
+    }
+  ],
+  "stream": true,
+  "temperature": 0.1,
+  "maxTokens": 512
+}
+```
+Ответ (потоковый режим): Server-Sent Events (SSE)
 
 ---
+# Веб-поиск (Fallback)
+
+Если в загруженных документах недостаточно релевантной информации, сервис автоматически выполняет веб-поиск через SearXNG.
+
+Условия активации:  
+- Найдено меньше min-documents релевантных чанков   
+- Веб-поиск включен в настройках
+
+Результаты поиска добавляются в контекст, и LLM генерирует ответ на основе объединенной информации.  
+
+```
+rag:
+  web-search:
+    enabled: true
+    min-documents: 1          
+    results-limit: 3          
+```
 
 # Тестирование
 
@@ -284,6 +328,23 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 }'
 ```
 
+### Потоковый запрос: к LLM
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+-H "Content-Type: application/json" \
+-d '{
+  "model":"qwen2.5:7b",
+  "messages":[
+    {
+      "role":"user",
+      "content":"Что такое Spring Boot?"
+    }
+  ],
+  "stream":true
+}'
+```
+
 ---
 
 # Структура проекта
@@ -313,25 +374,44 @@ src
 Документ
     │
     ▼
-Парсер (.txt/.md)
+Парсер (.txt/.md/.pdf/.docx)
+    │
+    ▼
+Асинхронная обработка (CompletableFuture)
     │
     ▼
 Chunking
     │
     ▼
-Ollama Embedding (nomic-embed-text)
+Проверка кэша эмбеддингов
+    │
+    ├─── Если есть в кэше → берем из кэша
+    │
+    └─── Если нет → Ollama Embedding (nomic-embed-text) → сохраняем в кэш
     │
     ▼
 Qdrant
+
+───────────────
+
+Запрос пользователя
     │
     ▼
-Similarity Search
+Similarity Search в Qdrant
     │
     ▼
-Формирование Prompt
+Достаточно документов?
+    │
+    ├─── Да → Формирование промпта с контекстом
+    │
+    └─── Нет → Веб-поиск (SearXNG) → добавляем в контекст
     │
     ▼
 Ollama Chat (qwen2.5:7b)
+    │
+    ├─── stream=false → JSON
+    │
+    └─── stream=true → SSE (Server-Sent Events)
     │
     ▼
 Ответ пользователю

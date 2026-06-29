@@ -22,27 +22,34 @@ services:
   app:
     build: .
     container_name: rag-app
-
     depends_on:
       - ollama
       - qdrant
-
     ports:
       - "8080:8080"
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
-
     depends_on:
       - ollama
-
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-
     ports:
       - "3000:8080"
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY}
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    command: [ "searxng" ]
 
 volumes:
   ollama:
   qdrant-data:
+  searxng-data:
