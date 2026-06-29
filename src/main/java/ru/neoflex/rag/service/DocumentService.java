@@ -2,15 +2,19 @@ package ru.neoflex.rag.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import ru.neoflex.rag.model.entity.DocumentInfo;
+import ru.neoflex.rag.model.entity.DocumentStatus;
 import ru.neoflex.rag.model.response.DocumentResponse;
 import ru.neoflex.rag.parser.DocumentParser;
 import ru.neoflex.rag.repository.QdrantDocumentRepository;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 @Slf4j
 @Service
@@ -19,30 +23,34 @@ public class DocumentService {
     private final List<DocumentParser> parsers;
     private final DocumentIndexingService documentIndexingService;
     private final QdrantDocumentRepository documentRepository;
+    private final ExecutorService documentExecutor;
 
     /**
-     * Загрузка документа
+     * Загрузка документа (асинхронная)
+     * Сразу возвращает статус PROCESSING, обработка идет в фоне
      */
     public DocumentResponse upload(MultipartFile file) {
         UUID documentId = UUID.randomUUID();
         String fileName = file.getOriginalFilename();
 
-        log.info("Starting upload: {}", fileName);
+        log.info("Starting async upload: {}", fileName);
 
-        try {
-            processDocument(documentId, file);
-            DocumentInfo docInfo = documentRepository.getAllDocuments().stream()
-                    .filter(doc -> doc.getId().equals(documentId))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("Document not found after processing"));
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Processing document: {}", fileName);
+                processDocument(documentId, file);
+                log.info("Document processed successfully: {}", fileName);
+            } catch (Exception e) {
+                log.error("Failed to process document: {}", fileName, e);
+            }
+        }, documentExecutor);
 
-            log.info("Upload completed: {}, chunks: {}", fileName, docInfo.getChunkCount());
-            return mapToResponse(docInfo);
-
-        } catch (Exception e) {
-            log.error("Upload failed: {}", fileName, e);
-            throw new RuntimeException("Failed to process document: " + e.getMessage(), e);
-        }
+        return DocumentResponse.builder()
+                .id(documentId)
+                .fileName(fileName)
+                .status(DocumentStatus.PROCESSING.name())
+                .chunkCount(0)
+                .build();
     }
 
     private void processDocument(UUID documentId, MultipartFile file) {

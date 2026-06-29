@@ -30,19 +30,15 @@ import java.util.stream.Collectors;
 @Repository
 @RequiredArgsConstructor
 public class QdrantDocumentRepository {
-
     private static final String COLLECTION_NAME = "rag-documents";
     private static final String DOCUMENT_ID_KEY = "documentId";
     private static final String FILE_NAME_KEY = "fileName";
-
     private final VectorStore vectorStore;
     private final QdrantClient qdrantClient;
 
     /**
      * Сохраняет документы в векторную БД.
      * Использует Spring AI VectorStore.
-     *
-     * @param documents список документов для сохранения
      */
     public void save(List<Document> documents) {
         vectorStore.add(documents);
@@ -73,9 +69,6 @@ public class QdrantDocumentRepository {
     /**
      * Удаляет все чанки документа по его идентификатору.
      * Использует Qdrant Client для удаления по фильтру.
-     *
-     * @param documentId идентификатор документа
-     * @throws RuntimeException если удаление не удалось
      */
     public void deleteByDocumentId(UUID documentId) {
         try {
@@ -105,8 +98,6 @@ public class QdrantDocumentRepository {
      * Получает список всех документов из векторной БД.
      * Использует Qdrant Client для обхода всех точек.
      * Документы группируются по documentId, для каждого вычисляется количество чанков.
-     *
-     * @return список документов с метаданными (id, имя файла, статус, количество чанков)
      */
     public List<DocumentInfo> getAllDocuments() {
         try {
@@ -123,7 +114,6 @@ public class QdrantDocumentRepository {
                 return Collections.emptyList();
             }
 
-            // Группируем точки по documentId
             Map<UUID, List<RetrievedPoint>> groupedByDocId = new HashMap<>();
             for (RetrievedPoint point : allPoints) {
                 if (point.getPayloadMap().containsKey(DOCUMENT_ID_KEY)) {
@@ -137,7 +127,6 @@ public class QdrantDocumentRepository {
                 }
             }
 
-            // Преобразуем в список DocumentInfo
             return groupedByDocId.entrySet().stream()
                     .map(entry -> {
                         UUID docId = entry.getKey();

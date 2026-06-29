@@ -9,8 +9,7 @@ import java.util.stream.Collectors;
 @Component
 public class PromptBuilder {
 
-    public String build(String question,
-                        List<Document> contextDocuments) {
+    public String build(String question, List<Document> contextDocuments, List<String> webResults) {
 
         String context = contextDocuments.stream()
                 .map(document -> {
@@ -26,14 +25,26 @@ public class PromptBuilder {
                 })
                 .collect(Collectors.joining("\n\n---\n\n"));
 
+        if (webResults != null && !webResults.isEmpty()) {
+            context += "\n\n---\n\nРезультаты веб-поиска:\n\n" +
+                    webResults.stream()
+                            .collect(Collectors.joining("\n\n"));
+        }
+
+        if (context.isEmpty()) {
+            context = "(Нет контекста)";
+        }
+
         return """
                 Ты — помощник, отвечающий только на основе предоставленного контекста.
 
-                Правила:
+                Правила (НАРУШЕНИЕ ЗАПРЕЩЕНО):
                 
-                - Отвечай только по контексту.
-                - Не придумывай факты.
-                - Если ответа нет в контексте — честно скажи об этом.
+                - Ответь на вопрос, используя ТОЛЬКО информацию из контекста.
+                - Скопируй соответствующие фрагменты из контекста дословно.
+                - Не придумывай факты. Если ответа нет в контексте — честно скажи об этом.
+                - Если контекст пустой — напиши: "В предоставленном контексте нет информации по вашему вопросу."
+                - Если использованы веб-результаты, укажи это в ответе.
                 - По возможности указывай источник.
 
                 Контекст:
