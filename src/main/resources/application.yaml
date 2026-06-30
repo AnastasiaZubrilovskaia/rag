@@ -9,14 +9,18 @@ spring:
 
   ai:
     ollama:
-      base-url: http://ollama:11434
-      chat:
-        options:
-          model: qwen2.5:7b
-          temperature: 0.2
+      base-url: http://host.docker.internal:11434
       embedding:
+        base-url: http://host.docker.internal:11434
         options:
           model: nomic-embed-text
+      chat:
+        base-url: https://ollama.com
+        api-key: ${OLLAMA_API_KEY}
+        options:
+          model: glm-4.7:cloud
+          temperature: 0.2
+
     vectorstore:
       qdrant:
         host: qdrant
