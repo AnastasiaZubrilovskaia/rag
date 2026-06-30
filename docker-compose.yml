@@ -1,14 +1,4 @@
-version: "3.9"
-
 services:
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama:/root/.ollama
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -18,25 +8,34 @@ services:
       - "6334:6334"
     volumes:
       - qdrant-data:/qdrant/storage
+    restart: unless-stopped
 
   app:
     build: .
     container_name: rag-app
     depends_on:
-      - ollama
       - qdrant
+      - searxng
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - SPRING_AI_OLLAMA_API_KEY=${OLLAMA_API_KEY}
+    restart: unless-stopped
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     depends_on:
-      - ollama
+      - app
     environment:
-      OLLAMA_BASE_URL: http://ollama:11434
+      OPENAI_API_BASE_URL: http://app:8080/v1
+      OPENAI_API_KEY: any-key
     ports:
       - "3000:8080"
+    restart: unless-stopped
 
   searxng:
     image: searxng/searxng:latest
@@ -44,12 +43,9 @@ services:
     ports:
       - "8888:8080"
     environment:
-      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY}
-    volumes:
-      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
-    command: [ "searxng" ]
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      - INSTANCE_NAME=rag-searxng
+    restart: unless-stopped
 
 volumes:
-  ollama:
   qdrant-data:
-  searxng-data:

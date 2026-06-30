@@ -1,8 +1,8 @@
 # RAG-сервис (Retrieval-Augmented Generation)
 
-RAG-сервис для загрузки документов, их индексации и генерации ответов с использованием локальной большой языковой модели (LLM).
+RAG-сервис для загрузки документов, их индексации и генерации ответов с использованием гибридного подхода: эмбеддинги локально, генерация через облачную LLM.   
 
-После загрузки документ разбивается на чанки, для каждого чанка создаются эмбеддинги с помощью модели **nomic-embed-text**, которые сохраняются в **Qdrant**. При поступлении пользовательского запроса выполняется семантический поиск наиболее релевантных фрагментов, после чего найденный контекст передается языковой модели **qwen2.5:7b**, запущенной в **Ollama**, для генерации ответа.
+Эмбеддинги для документов создаются с помощью модели **nomic-embed-text**, запущенной локально в Ollama, и сохраняются в **Qdrant**. При поступлении пользовательского запроса выполняется семантический поиск релевантных фрагментов, после чего найденный контекст передается облачной LLM **glm-4.7:cloud** (Ollama Cloud) для генерации ответа.
 
 ---
 
@@ -16,7 +16,7 @@ RAG-сервис для загрузки документов, их индекс
 - Кэширование эмбеддингов для повторного использования
 - Хранение документов и эмбеддингов в Qdrant
 - Семантический поиск релевантных фрагментов
-- Генерация ответов на основе найденного контекста (RAG)
+- Генерация ответов на основе найденного контекста через облачную LLM
 - Потоковая передача ответов (stream=true, SSE)
 - Асинхронная обработка документов (CompletableFuture)
 - Веб-поиск как fallback при недостатке контекста (SearXNG)
@@ -39,7 +39,8 @@ RAG-сервис для загрузки документов, их индекс
 | Springdoc OpenAPI | 2.8.9 |
 | Apache PDFBox | 3.0.3 |
 | Apache POI | 5.3.0 |
-| Ollama | latest |
+| Ollama (локальный) | latest |
+| Ollama Cloud | — |
 | Qdrant | latest |
 | SearXNG | latest |
 | Open WebUI | latest |
@@ -53,7 +54,8 @@ RAG-сервис для загрузки документов, их индекс
 - Docker Compose
 - Java 21+ (для локального запуска)
 - Maven 3.9+
-
+- Локально установленный Ollama (для эмбеддингов)
+- API-ключ для Ollama Cloud (для генерации)
 ---
 
 # Установка и запуск
@@ -67,7 +69,17 @@ cd rag
 
 ---
 
-## 2. Запуск сервисов
+## 2. Настройка переменных окружения
+
+Создайте файл .env в корне проекта:
+
+```
+OLLAMA_API_KEY=ваш_ключ
+```
+
+---
+
+## 3. Запуск сервисов
 
 ```bash
 docker compose up --build
@@ -81,25 +93,22 @@ docker compose up --build
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | OpenAPI | http://localhost:8080/v3/api-docs |
 | Open WebUI | http://localhost:3000 |
-| Ollama | http://localhost:11434 |
 | Qdrant Dashboard | http://localhost:6333/dashboard |
 | SearXNG| http://localhost:8888 |
 
 ---
 
-## 3. Загрузка моделей Ollama
+## 4.  Запуск локального Ollama для эмбеддингов
 
-Если модели отсутствуют:
-
-```bash
-docker exec -it ollama ollama pull qwen2.5:7b
-docker exec -it ollama ollama pull nomic-embed-text
+```
+ollama serve
 ```
 
-Проверить установленные модели:
+Проверить, что эмбеддинг-модель загружена:
 
 ```bash
-docker exec -it ollama ollama list
+ollama pull nomic-embed-text
+ollama list
 ```
 
 ---
@@ -119,9 +128,29 @@ GET /v1/models
   "object": "list",
   "data": [
     {
+      "id": "nomic-embed-text:latest",
+      "object": "model",
+      "owned_by": "local"
+    },
+    {
       "id": "qwen2.5:7b",
       "object": "model",
       "owned_by": "local"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "object": "model",
+      "owned_by": "cloud"
+    },
+    {
+      "id": "minimax-m2.1",
+      "object": "model",
+      "owned_by": "cloud"
+    },
+    {
+      "id": "minimax-m3",
+      "object": "model",
+      "owned_by": "cloud"
     }
   ]
 }
@@ -212,7 +241,7 @@ POST /v1/chat/completions
 
 ```json
 {
-  "model": "qwen2.5:7b",
+  "model": "glm-4.7:cloud",
   "messages": [
     {
       "role": "user",
@@ -254,7 +283,7 @@ POST /v1/chat/completions
 
 ```json
 {
-  "model": "qwen2.5:7b",
+  "model": "glm-4.7:cloud",
   "messages": [
     {
       "role": "user",
@@ -321,7 +350,7 @@ curl http://localhost:8080/api/documents
 curl -X POST http://localhost:8080/v1/chat/completions \
 -H "Content-Type: application/json" \
 -d '{
-  "model":"qwen2.5:7b",
+  "model":"glm-4.7:cloud",
   "messages":[
     {
       "role":"user",
@@ -338,7 +367,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 curl -X POST http://localhost:8080/v1/chat/completions \
 -H "Content-Type: application/json" \
 -d '{
-  "model":"qwen2.5:7b",
+  "model":"glm-4.7:cloud",
   "messages":[
     {
       "role":"user",
@@ -411,7 +440,7 @@ Similarity Search в Qdrant
     └─── Нет → Веб-поиск (SearXNG) → добавляем в контекст
     │
     ▼
-Ollama Chat (qwen2.5:7b)
+Ollama Cloud (glm-4.7:cloud)
     │
     ├─── stream=false → JSON
     │
