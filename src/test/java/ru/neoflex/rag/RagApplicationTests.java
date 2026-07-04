@@ -7,7 +7,6 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.test.context.TestPropertySource;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration",
@@ -21,6 +20,10 @@ import org.springframework.test.context.TestPropertySource;
 })
 class RagApplicationTests {
 
+    @Test
+    void contextLoads() {
+    }
+
     @TestConfiguration
     static class TestConfig {
 
@@ -33,10 +36,6 @@ class RagApplicationTests {
         QdrantClient mockQdrantClient() {
             return Mockito.mock(QdrantClient.class);
         }
-    }
-
-    @Test
-    void contextLoads() {
     }
 
 }

@@ -11,16 +11,13 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.MediaType;
-import org.springframework.http.HttpHeaders;
 import reactor.core.publisher.Flux;
 import ru.neoflex.rag.model.request.ChatCompletionRequest;
 import ru.neoflex.rag.model.request.ChatMessage;
 import ru.neoflex.rag.model.response.chat.ChatCompletionResponse;
 import ru.neoflex.rag.properties.RagProperties;
 import ru.neoflex.rag.service.*;
+
 
 import java.util.List;
 import java.util.Map;
