@@ -35,18 +35,20 @@ public class RagService {
      * Обычный (непотоковый) режим
      */
     public ChatCompletionResponse chat(ChatCompletionRequest request) {
-        String question = questionExtractor.extract(request);
+        String lastQuestion = questionExtractor.extractLastQuestion(request);
+        String history = questionExtractor.buildHistory(request);
+
         List<Document> documents = vectorStoreService.search(
-                question,
+                lastQuestion,
                 ragProperties.getSearch().getTopK(),
                 ragProperties.getSearch().getSimilarityThreshold()
         );
 
         log.info("Found {} relevant documents", documents.size());
 
-        List<String> webResults = performWebSearchIfNeeded(question, documents);
+        List<String> webResults = performWebSearchIfNeeded(lastQuestion, documents);
 
-        String prompt = promptBuilder.build(question, documents, webResults);
+        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults);
 
         Prompt promptObject = new Prompt(new UserMessage(prompt));
         ChatResponse response = chatModel.call(promptObject);
@@ -60,18 +62,20 @@ public class RagService {
      * Потоковый режим (SSE)
      */
     public Flux<String> chatStream(ChatCompletionRequest request) {
-        String question = questionExtractor.extract(request);
+        String lastQuestion = questionExtractor.extractLastQuestion(request);
+        String history = questionExtractor.buildHistory(request);
+
         List<Document> documents = vectorStoreService.search(
-                question,
+                lastQuestion,
                 ragProperties.getSearch().getTopK(),
                 ragProperties.getSearch().getSimilarityThreshold()
         );
 
         log.info("Found {} relevant documents for stream", documents.size());
 
-        List<String> webResults = performWebSearchIfNeeded(question, documents);
+        List<String> webResults = performWebSearchIfNeeded(lastQuestion, documents);
 
-        String prompt = promptBuilder.build(question, documents, webResults);
+        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults);
 
         Prompt promptObject = new Prompt(new UserMessage(prompt));
 
