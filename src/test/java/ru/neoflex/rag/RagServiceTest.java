@@ -56,7 +56,8 @@ class RagServiceTest {
         request.setModel("qwen2.5:7b");
         request.setMessages(List.of(new ChatMessage()));
 
-        when(questionExtractor.extract(any())).thenReturn("test question");
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -70,7 +71,7 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of(new Document("test content", Map.of("fileName", "test.txt"))));
 
-        when(promptBuilder.build(any(), any(), any())).thenReturn("prompt");
+        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt");
 
         AssistantMessage assistantMessage = new AssistantMessage("test answer");
         Generation generation = new Generation(assistantMessage);
@@ -91,7 +92,8 @@ class RagServiceTest {
         request.setModel("qwen2.5:7b");
         request.setMessages(List.of(new ChatMessage()));
 
-        when(questionExtractor.extract(any())).thenReturn("test question");
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -108,7 +110,7 @@ class RagServiceTest {
 
         when(webSearchService.search(any())).thenReturn(List.of("web result"));
 
-        when(promptBuilder.build(any(), any(), any())).thenReturn("prompt with web results");
+        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt with web results");
 
         AssistantMessage assistantMessage = new AssistantMessage("answer from web");
         Generation generation = new Generation(assistantMessage);
@@ -131,7 +133,8 @@ class RagServiceTest {
         userMessage.setContent("Stream question");
         request.setMessages(List.of(userMessage));
 
-        when(questionExtractor.extract(any())).thenReturn("test question");
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -145,7 +148,7 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of(new Document("test content", Map.of("fileName", "test.txt"))));
 
-        when(promptBuilder.build(any(), any(), any())).thenReturn("prompt");
+        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt");
 
         AssistantMessage assistantMessage = new AssistantMessage("stream answer");
         Generation generation = new Generation(assistantMessage);
@@ -168,7 +171,8 @@ class RagServiceTest {
         userMessage.setContent("Stream question");
         request.setMessages(List.of(userMessage));
 
-        when(questionExtractor.extract(any())).thenReturn("test question");
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -183,7 +187,7 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of());
         when(webSearchService.search(any())).thenReturn(List.of("web result"));
-        when(promptBuilder.build(any(), any(), any())).thenReturn("prompt with web results");
+        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt with web results");
 
         AssistantMessage assistantMessage = new AssistantMessage("answer from web stream");
         Generation generation = new Generation(assistantMessage);
