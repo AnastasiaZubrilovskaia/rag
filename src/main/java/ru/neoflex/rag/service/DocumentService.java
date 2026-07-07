@@ -23,6 +23,7 @@ public class DocumentService {
     private final DocumentIndexingService documentIndexingService;
     private final QdrantDocumentRepository documentRepository;
     private final ExecutorService documentExecutor;
+    private final EmbeddingCacheService embeddingCacheService;
 
     /**
      * Загрузка документа (асинхронная)
@@ -78,6 +79,7 @@ public class DocumentService {
      * Удаление документа из Qdrant
      */
     public void deleteDocument(UUID id) {
+        embeddingCacheService.evictDocument(id);
         documentRepository.deleteByDocumentId(id);
         log.info("Document deleted: {}", id);
     }

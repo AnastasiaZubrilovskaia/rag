@@ -13,6 +13,7 @@ import ru.neoflex.rag.parser.DocumentParser;
 import ru.neoflex.rag.repository.QdrantDocumentRepository;
 import ru.neoflex.rag.service.DocumentIndexingService;
 import ru.neoflex.rag.service.DocumentService;
+import ru.neoflex.rag.service.EmbeddingCacheService;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,13 +40,16 @@ class DocumentServiceTest {
     @Mock
     private MultipartFile file;
 
+    @Mock
+    private EmbeddingCacheService embeddingCacheService;
+
     private ExecutorService documentExecutor = Executors.newSingleThreadExecutor();
 
     private DocumentService documentService;
 
     @BeforeEach
     void setUp() {
-        documentService = new DocumentService(parsers, indexingService, repository, documentExecutor);
+        documentService = new DocumentService(parsers, indexingService, repository, documentExecutor, embeddingCacheService);
     }
 
     @Test
@@ -92,5 +96,6 @@ class DocumentServiceTest {
         UUID docId = UUID.randomUUID();
         documentService.deleteDocument(docId);
         verify(repository).deleteByDocumentId(docId);
+        verify(embeddingCacheService).evictDocument(docId);
     }
 }

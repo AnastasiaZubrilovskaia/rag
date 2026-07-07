@@ -23,9 +23,11 @@ public class DocumentIndexingService {
         List<Document> documents = new ArrayList<>();
 
         int cachedCount = 0;
+        List<String> chunkTexts = new ArrayList<>();
 
         for (int i = 0; i < chunks.size(); i++) {
             String chunk = chunks.get(i);
+            chunkTexts.add(chunk);
 
             if (embeddingCacheService.contains(chunk)) {
                 cachedCount++;
@@ -35,6 +37,7 @@ public class DocumentIndexingService {
             documents.add(createDocument(documentId, fileName, chunk, i));
         }
 
+        embeddingCacheService.registerDocumentTexts(documentId, chunkTexts);
         log.info("Document {}: chunks={}, cached={}", fileName, chunks.size(), cachedCount);
 
         vectorStoreService.saveDocuments(documents);
