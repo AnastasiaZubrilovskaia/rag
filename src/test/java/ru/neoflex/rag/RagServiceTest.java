@@ -12,6 +12,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
 import reactor.core.publisher.Flux;
+import ru.neoflex.rag.model.entity.AnswerStyle;
 import ru.neoflex.rag.model.request.ChatCompletionRequest;
 import ru.neoflex.rag.model.request.ChatMessage;
 import ru.neoflex.rag.model.response.chat.ChatCompletionResponse;
@@ -24,7 +25,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class RagServiceTest {
@@ -50,6 +51,9 @@ class RagServiceTest {
     @InjectMocks
     private RagService ragService;
 
+    @Mock
+    private QueryClassifier queryClassifier;
+
     @Test
     void shouldGenerateResponse() {
         ChatCompletionRequest request = new ChatCompletionRequest();
@@ -58,6 +62,8 @@ class RagServiceTest {
 
         when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
         when(questionExtractor.buildHistory(any())).thenReturn("");
+
+        when(queryClassifier.isChat(any())).thenReturn(false);
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -71,7 +77,7 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of(new Document("test content", Map.of("fileName", "test.txt"))));
 
-        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt");
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class))).thenReturn("prompt");
 
         AssistantMessage assistantMessage = new AssistantMessage("test answer");
         Generation generation = new Generation(assistantMessage);
@@ -87,6 +93,34 @@ class RagServiceTest {
     }
 
     @Test
+    void shouldSkipSearchForChatQuery() {
+        ChatCompletionRequest request = new ChatCompletionRequest();
+        request.setModel("qwen2.5:7b");
+        request.setMessages(List.of(new ChatMessage()));
+
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("Привет");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
+
+        when(queryClassifier.isChat(any())).thenReturn(true);
+
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class))).thenReturn("prompt for chat");
+
+        AssistantMessage assistantMessage = new AssistantMessage("Привет!");
+        Generation generation = new Generation(assistantMessage);
+        ChatResponse chatResponse = new ChatResponse(List.of(generation));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+
+        ChatCompletionResponse response = ragService.chat(request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getChoices().get(0).getMessage().getContent()).isEqualTo("Привет!");
+
+        verify(vectorStoreService, never()).search(any(), anyInt(), anyDouble());
+        verify(webSearchService, never()).search(any());
+
+    }
+
+    @Test
     void shouldUseWebSearchWhenNoDocumentsFound() {
         ChatCompletionRequest request = new ChatCompletionRequest();
         request.setModel("qwen2.5:7b");
@@ -94,6 +128,7 @@ class RagServiceTest {
 
         when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
         when(questionExtractor.buildHistory(any())).thenReturn("");
+        when(queryClassifier.isChat(any())).thenReturn(false);
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -110,7 +145,8 @@ class RagServiceTest {
 
         when(webSearchService.search(any())).thenReturn(List.of("web result"));
 
-        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt with web results");
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class)))
+                .thenReturn("prompt with web results");
 
         AssistantMessage assistantMessage = new AssistantMessage("answer from web");
         Generation generation = new Generation(assistantMessage);
@@ -135,6 +171,7 @@ class RagServiceTest {
 
         when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
         when(questionExtractor.buildHistory(any())).thenReturn("");
+        when(queryClassifier.isChat(any())).thenReturn(false);
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -148,7 +185,7 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of(new Document("test content", Map.of("fileName", "test.txt"))));
 
-        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt");
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class))).thenReturn("prompt");
 
         AssistantMessage assistantMessage = new AssistantMessage("stream answer");
         Generation generation = new Generation(assistantMessage);
@@ -173,6 +210,7 @@ class RagServiceTest {
 
         when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
         when(questionExtractor.buildHistory(any())).thenReturn("");
+        when(queryClassifier.isChat(any())).thenReturn(false);
 
         RagProperties.Search search = new RagProperties.Search();
         search.setTopK(5);
@@ -187,7 +225,8 @@ class RagServiceTest {
         when(vectorStoreService.search(any(), anyInt(), anyDouble()))
                 .thenReturn(List.of());
         when(webSearchService.search(any())).thenReturn(List.of("web result"));
-        when(promptBuilder.build(any(), any(), any(), any())).thenReturn("prompt with web results");
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class)))
+                .thenReturn("prompt with web results");
 
         AssistantMessage assistantMessage = new AssistantMessage("answer from web stream");
         Generation generation = new Generation(assistantMessage);

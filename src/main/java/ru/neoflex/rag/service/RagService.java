@@ -9,6 +9,8 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import ru.neoflex.rag.exception.QuotaExceededException;
+import ru.neoflex.rag.model.entity.AnswerStyle;
 import ru.neoflex.rag.model.request.ChatCompletionRequest;
 import ru.neoflex.rag.model.response.chat.ChatCompletionResponse;
 import ru.neoflex.rag.model.response.chat.ChatResponseMessage;
@@ -27,9 +29,10 @@ public class RagService {
     private final QuestionExtractor questionExtractor;
     private final VectorStoreService vectorStoreService;
     private final PromptBuilder promptBuilder;
-    private final ChatModel chatModel;
+    private final OllamaChatService ollamaChatService;
     private final RagProperties ragProperties;
     private final WebSearchService webSearchService;
+    private final QueryClassifier queryClassifier;
 
     /**
      * Обычный (непотоковый) режим
@@ -38,24 +41,40 @@ public class RagService {
         String lastQuestion = questionExtractor.extractLastQuestion(request);
         String history = questionExtractor.buildHistory(request);
 
-        List<Document> documents = vectorStoreService.search(
-                lastQuestion,
-                ragProperties.getSearch().getTopK(),
-                ragProperties.getSearch().getSimilarityThreshold()
-        );
+        AnswerStyle style = AnswerStyle.fromModel(request.getModel());
+        log.info("Answer style: {} for model: {}", style, request.getModel());
 
-        log.info("Found {} relevant documents", documents.size());
+        boolean isChat = queryClassifier.isChat(lastQuestion);
+        List<Document> documents = List.of();
+        List<String> webResults = List.of();
 
-        List<String> webResults = performWebSearchIfNeeded(lastQuestion, documents);
+        if (!isChat) {
+            documents = vectorStoreService.search(
+                    lastQuestion,
+                    ragProperties.getSearch().getTopK(),
+                    ragProperties.getSearch().getSimilarityThreshold()
+            );
 
-        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults);
+            if (documents.size() < ragProperties.getWebSearch().getMinDocuments()
+                    && ragProperties.getWebSearch().isEnabled()) {
+                log.info("Not enough documents ({}), trying web search", documents.size());
+                webResults = webSearchService.search(lastQuestion);
+            }
+        } else {
+            log.info("Chat query detected, skipping RAG search: {}", lastQuestion);
+        }
+
+        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults, style);
 
         Prompt promptObject = new Prompt(new UserMessage(prompt));
-        ChatResponse response = chatModel.call(promptObject);
-
-        String answer = response.getResult().getOutput().getText();
-
-        return buildResponse(request.getModel(), answer);
+        try {
+            ChatResponse response = ollamaChatService.call(promptObject);
+            String answer = response.getResult().getOutput().getText();
+            return buildResponse(request.getModel(), answer);
+        } catch (QuotaExceededException e) {
+            log.error("Quota exceeded: {}", e.getMessage());
+            return buildQuotaErrorResponse(request.getModel(), e);
+        }
     }
 
     /**
@@ -65,51 +84,49 @@ public class RagService {
         String lastQuestion = questionExtractor.extractLastQuestion(request);
         String history = questionExtractor.buildHistory(request);
 
-        List<Document> documents = vectorStoreService.search(
-                lastQuestion,
-                ragProperties.getSearch().getTopK(),
-                ragProperties.getSearch().getSimilarityThreshold()
-        );
+        AnswerStyle style = AnswerStyle.fromModel(request.getModel());
+        log.info("Answer style (stream): {} for model: {}", style, request.getModel());
+        boolean isChat = queryClassifier.isChat(lastQuestion);
 
-        log.info("Found {} relevant documents for stream", documents.size());
+        List<Document> documents = List.of();
+        List<String> webResults = List.of();
 
-        List<String> webResults = performWebSearchIfNeeded(lastQuestion, documents);
+        if (!isChat) {
+            documents = vectorStoreService.search(
+                    lastQuestion,
+                    ragProperties.getSearch().getTopK(),
+                    ragProperties.getSearch().getSimilarityThreshold()
+            );
 
-        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults);
+            if (documents.size() < ragProperties.getWebSearch().getMinDocuments()
+                    && ragProperties.getWebSearch().isEnabled()) {
+                log.info("Not enough documents ({}), trying web search", documents.size());
+                webResults = webSearchService.search(lastQuestion);
+            }
+        } else {
+            log.info("Chat query detected (stream), skipping RAG search: {}", lastQuestion);
+        }
+
+        String prompt = promptBuilder.build(lastQuestion, history, documents, webResults, style);
 
         Prompt promptObject = new Prompt(new UserMessage(prompt));
 
-        return chatModel.stream(promptObject)
+        return ollamaChatService.stream(promptObject)
                 .map(chunk -> {
                     String content = chunk.getResult().getOutput().getText();
                     return buildStreamChunk(request.getModel(), content);
                 })
-                .concatWith(Flux.just(buildStreamDone()));
+                .concatWith(Flux.just(buildStreamDone()))
+                .onErrorResume(QuotaExceededException.class, e -> {
+                    log.error("Quota exceeded during streaming: {}", e.getMessage());
+                    return Flux.just(
+                            buildStreamErrorChunk(request.getModel(), e),
+                            buildStreamDone()
+                    );
+                });
     }
 
-    /**
-     * Выполняет веб-поиск, если:
-     * 1. Веб-поиск включен в настройках
-     * 2. Найдено меньше minDocuments документов
-     */
-    private List<String> performWebSearchIfNeeded(String question, List<Document> documents) {
-        RagProperties.WebSearch config = ragProperties.getWebSearch();
 
-        if (!config.isEnabled()) {
-            log.debug("Web search is disabled");
-            return List.of();
-        }
-
-        if (documents.size() >= config.getMinDocuments()) {
-            log.debug("Found enough documents ({} >= {}), skipping web search",
-                    documents.size(), config.getMinDocuments());
-            return List.of();
-        }
-
-        log.info("Not enough relevant documents ({} < {}), trying web search...",
-                documents.size(), config.getMinDocuments());
-        return webSearchService.search(question);
-    }
 
     /**
      * Строит SSE чанк для потоковой передачи
@@ -184,5 +201,75 @@ public class RagService {
                                 .build()
                 )
                 .build();
+    }
+
+    /**
+     * Строит ответ с ошибкой квоты для обычного режима
+     */
+    private ChatCompletionResponse buildQuotaErrorResponse(String model, QuotaExceededException e) {
+        String errorMessage = "Ошибка: " + e.getMessage();
+        if (e.getRetryAfterSeconds() != null) {
+            errorMessage += " Повторите через " + e.getRetryAfterSeconds() + " секунд.";
+        }
+
+        return ChatCompletionResponse.builder()
+                .id("chatcmpl-" + UUID.randomUUID())
+                .object("chat.completion")
+                .created(Instant.now().getEpochSecond())
+                .model(model)
+                .choices(List.of(
+                        Choice.builder()
+                                .index(0)
+                                .message(
+                                        ChatResponseMessage.builder()
+                                                .role("assistant")
+                                                .content(errorMessage)
+                                                .build()
+                                )
+                                .finishReason("error")
+                                .build()
+                ))
+                .usage(
+                        Usage.builder()
+                                .promptTokens(0)
+                                .completionTokens(0)
+                                .totalTokens(0)
+                                .build()
+                )
+                .build();
+    }
+
+    /**
+     * Строит SSE чанк с ошибкой квоты
+     */
+    private String buildStreamErrorChunk(String model, QuotaExceededException e) {
+        String errorMessage = "Ошибка: " + e.getMessage();
+        if (e.getRetryAfterSeconds() != null) {
+            errorMessage += " Повторите через " + e.getRetryAfterSeconds() + " секунд.";
+        }
+
+        return "data: " + """
+        {
+            "id": "chatcmpl-%s",
+            "object": "chat.completion.chunk",
+            "created": %d,
+            "model": "%s",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": "%s"
+                    },
+                    "finish_reason": "error"
+                }
+            ]
+        }
+        """.formatted(
+                UUID.randomUUID(),
+                Instant.now().getEpochSecond(),
+                model,
+                escapeJson(errorMessage)
+        ).replace("\n", " ") + "\n\n";
     }
 }

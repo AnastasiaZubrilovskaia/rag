@@ -25,8 +25,8 @@ import java.util.List;
 public class ModelController {
 
     private final OllamaApi ollamaApi;
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${spring.ai.ollama.chat.api-key:}")
     private String apiKey;
