@@ -2,6 +2,7 @@ package ru.neoflex.rag;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
+import ru.neoflex.rag.model.entity.AnswerStyle;
 import ru.neoflex.rag.service.PromptBuilder;
 
 import java.util.List;
@@ -21,8 +22,7 @@ class PromptBuilderTest {
         );
         List<String> webResults = List.of();
 
-        String prompt = promptBuilder.build(question, history, docs, webResults);
-
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.EXPERT);
         assertThat(prompt).contains("Java is a programming language.");
         assertThat(prompt).contains("Источник: java.txt");
         assertThat(prompt).contains("=== ВОПРОС ===");
@@ -35,7 +35,7 @@ class PromptBuilderTest {
         List<Document> docs = List.of();
         List<String> webResults = List.of("AI is artificial intelligence.");
 
-        String prompt = promptBuilder.build(question, history, docs, webResults);
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.EXPERT);
 
         assertThat(prompt).contains("Результаты веб-поиска");
         assertThat(prompt).contains("AI is artificial intelligence.");
@@ -49,7 +49,7 @@ class PromptBuilderTest {
         List<Document> docs = List.of();
         List<String> webResults = List.of();
 
-        String prompt = promptBuilder.build(question, history, docs, webResults);
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.EXPERT);
 
         assertThat(prompt).contains("(Нет контекста)");
         assertThat(prompt).contains("=== ВОПРОС ===");
@@ -62,12 +62,41 @@ class PromptBuilderTest {
         List<Document> docs = List.of();
         List<String> webResults = List.of();
 
-        String prompt = promptBuilder.build(question, history, docs, webResults);
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.EXPERT);
 
         assertThat(prompt).contains("=== ИСТОРИЯ ДИАЛОГА ===");
         assertThat(prompt).contains("Пользователь: Расскажи про первую главу");
         assertThat(prompt).contains("Ассистент: В первой главе описывается...");
         assertThat(prompt).contains("=== ВОПРОС ===");
         assertThat(prompt).contains("А про вторую главу?");
+    }
+
+    @Test
+    void shouldBuildPromptWithSimpleStyle() {
+        String question = "What is Java?";
+        String history = null;
+        List<Document> docs = List.of(
+                new Document("Java is a programming language.", Map.of("fileName", "java.txt"))
+        );
+        List<String> webResults = List.of();
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.SIMPLE);
+
+        assertThat(prompt).contains("Объясняй простыми словами");
+        assertThat(prompt).contains("Java is a programming language.");
+    }
+
+    @Test
+    void shouldBuildPromptWithEli5Style() {
+        String question = "What is Java?";
+        String history = null;
+        List<Document> docs = List.of(
+                new Document("Java is a programming language.", Map.of("fileName", "java.txt"))
+        );
+        List<String> webResults = List.of();
+
+        String prompt = promptBuilder.build(question, history, docs, webResults, AnswerStyle.ELI5);
+
+        assertThat(prompt).contains("объясняет сложные вещи как для ребенка 5 лет");
+        assertThat(prompt).contains("Java is a programming language.");
     }
 }

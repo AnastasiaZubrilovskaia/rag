@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
+import ru.neoflex.rag.interceptor.OllamaQuotaErrorHandler;
 
 import java.time.Duration;
 
@@ -22,7 +23,10 @@ public class RestTemplateConfig {
         factory.setConnectTimeout((int) timeout.toMillis());
         factory.setReadTimeout((int) timeout.toMillis());
 
-        return new RestTemplate(factory);
+        RestTemplate restTemplate = new RestTemplate(factory);
+        restTemplate.setErrorHandler(new OllamaQuotaErrorHandler());
+
+        return restTemplate;
     }
 
     private Duration parseTimeout(String timeoutStr) {

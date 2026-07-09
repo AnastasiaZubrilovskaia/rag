@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.multipart.MultipartFile;
+import ru.neoflex.rag.exception.DocumentNotFoundException;
 import ru.neoflex.rag.model.entity.DocumentInfo;
 import ru.neoflex.rag.model.entity.DocumentStatus;
 import ru.neoflex.rag.model.response.DocumentResponse;
@@ -23,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -92,10 +94,32 @@ class DocumentServiceTest {
     }
 
     @Test
-    void shouldDeleteDocument() {
-        UUID docId = UUID.randomUUID();
+    void shouldDeleteDocumentSuccessfully() {
+        String fileName = "test.txt";
+        when(file.getOriginalFilename()).thenReturn(fileName);
+
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.supports(fileName)).thenReturn(true);
+        when(parser.parse(any())).thenReturn("content");
+        parsers.add(parser);
+
+        DocumentResponse uploadResponse = documentService.upload(file);
+        UUID docId = uploadResponse.getId();
+        doNothing().when(repository).deleteByDocumentId(docId);
+        doNothing().when(embeddingCacheService).evictDocument(docId);
+
         documentService.deleteDocument(docId);
+
         verify(repository).deleteByDocumentId(docId);
         verify(embeddingCacheService).evictDocument(docId);
+    }
+
+    @Test
+    void shouldThrowExceptionWhenDeletingNonExistentDocument() {
+        UUID nonExistentId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> documentService.deleteDocument(nonExistentId))
+                .isInstanceOf(DocumentNotFoundException.class)
+                .hasMessageContaining("Документ с id " + nonExistentId + " не найден");
     }
 }
