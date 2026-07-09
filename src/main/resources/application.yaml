@@ -1,6 +1,9 @@
 server:
   port: 8080
 
+qdrant:
+  timeout: 5s
+
 spring:
   servlet:
     multipart:
@@ -20,6 +23,7 @@ spring:
         options:
           model: glm-4.7:cloud
           temperature: 0.2
+        timeout: 30s
 
     vectorstore:
       qdrant:
@@ -45,6 +49,85 @@ rag:
 
 searxng:
   base-url: http://searxng:8080
+  timeout: 10s
+
+resilience4j:
+  retry:
+    instances:
+      qdrantRetry:
+        max-attempts: 3
+        wait-duration: 1s
+        retry-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+          - ru.neoflex.rag.exception.QdrantException
+        ignore-exceptions:
+          - ru.neoflex.rag.exception.DocumentNotFoundException
+      ollamaRetry:
+        max-attempts: 3
+        wait-duration: 2s
+        retry-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+        ignore-exceptions:
+          - org.springframework.ai.retry.NonTransientAiException
+      searxngRetry:
+        max-attempts: 2
+        wait-duration: 1s
+        retry-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+  circuitbreaker:
+    instances:
+      qdrantCircuitBreaker:
+        sliding-window-size: 10          # Количество запросов для анализа
+        failure-rate-threshold: 50       # 50% ошибок для размыкания цепи
+        wait-duration-in-open-state: 30s # перед попыткой восстановления
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+          - ru.neoflex.rag.exception.RetryableException
+        ignore-exceptions:
+          - ru.neoflex.rag.exception.DocumentNotFoundException
+      ollamaCircuitBreaker:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+        record-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+      searxngCircuitBreaker:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        record-exceptions:
+          - java.net.SocketTimeoutException
+          - java.io.IOException
+
+    timelimiter:
+      instances:
+        qdrantTimeLimiter:
+          timeout-duration: 5s
+        ollamaTimeLimiter:
+          timeout-duration: 30s
+        searxngTimeLimiter:
+          timeout-duration: 10s
+
+    bulkhead:
+      instances:
+        qdrantBulkhead:
+          max-concurrent-calls: 10         # Максимум одновременных вызовов
+          max-wait-duration: 100ms         # Время ожидания в очереди
+        ollamaBulkhead:
+          max-concurrent-calls: 5
+          max-wait-duration: 200ms
+        searxngBulkhead:
+          max-concurrent-calls: 3
+          max-wait-duration: 100ms
 
 logging:
   level:

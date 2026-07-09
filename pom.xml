@@ -21,6 +21,8 @@
 		<poi.version>5.3.0</poi.version>
 		<jsoup.version>1.18.3</jsoup.version>
 		<boilerpipe.version>1.1.0</boilerpipe.version>
+		<resilience4j.version>2.2.0</resilience4j.version>
+		<spring-aop.version>3.4.10</spring-aop.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -70,7 +72,6 @@
 			<artifactId>poi-ooxml</artifactId>
 			<version>${poi.version}</version>
 		</dependency>
-
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
@@ -91,6 +92,17 @@
 			<artifactId>boilerpipe</artifactId>
 			<version>${boilerpipe.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring-boot3</artifactId>
+			<version>${resilience4j.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aop</artifactId>
+			<version>${spring-aop.version}</version>
+		</dependency>
+
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
