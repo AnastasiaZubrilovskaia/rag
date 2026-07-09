@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import ru.neoflex.rag.exception.DocumentNotFoundException;
+import ru.neoflex.rag.exception.QdrantException;
 import ru.neoflex.rag.model.entity.DocumentInfo;
 import ru.neoflex.rag.model.entity.DocumentStatus;
 import ru.neoflex.rag.model.response.DocumentResponse;
@@ -11,8 +13,10 @@ import ru.neoflex.rag.parser.DocumentParser;
 import ru.neoflex.rag.repository.QdrantDocumentRepository;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
 @Slf4j
@@ -25,6 +29,8 @@ public class DocumentService {
     private final ExecutorService documentExecutor;
     private final EmbeddingCacheService embeddingCacheService;
 
+    private final Map<UUID, DocumentInfo> documentStore = new ConcurrentHashMap<>();
+
     /**
      * Загрузка документа (асинхронная)
      * Сразу возвращает статус PROCESSING, обработка идет в фоне
@@ -33,35 +39,44 @@ public class DocumentService {
         UUID documentId = UUID.randomUUID();
         String fileName = file.getOriginalFilename();
 
+        DocumentInfo docInfo = DocumentInfo.builder()
+                .id(documentId)
+                .fileName(fileName)
+                .status(DocumentStatus.PROCESSING)
+                .chunkCount(0)
+                .build();
+        documentStore.put(documentId, docInfo);
+
         log.info("Starting async upload: {}", fileName);
 
         CompletableFuture.runAsync(() -> {
             try {
-                log.info("Processing document: {}", fileName);
                 processDocument(documentId, file);
+                docInfo.setStatus(DocumentStatus.COMPLETED);
                 log.info("Document processed successfully: {}", fileName);
             } catch (Exception e) {
                 log.error("Failed to process document: {}", fileName, e);
+                docInfo.setStatus(DocumentStatus.FAILED);
             }
         }, documentExecutor);
 
-        return DocumentResponse.builder()
-                .id(documentId)
-                .fileName(fileName)
-                .status(DocumentStatus.PROCESSING.name())
-                .chunkCount(0)
-                .build();
+        return mapToResponse(docInfo);
     }
 
     private void processDocument(UUID documentId, MultipartFile file) {
         DocumentParser parser = getParser(file.getOriginalFilename());
         String text = parser.parse(file);
 
-        documentIndexingService.indexDocument(
+        int chunkCount = documentIndexingService.indexDocument(
                 documentId,
                 file.getOriginalFilename(),
                 text
         );
+
+        DocumentInfo docInfo = documentStore.get(documentId);
+        if (docInfo != null) {
+            docInfo.setChunkCount(chunkCount);
+        }
     }
 
     /**
@@ -79,9 +94,31 @@ public class DocumentService {
      * Удаление документа из Qdrant
      */
     public void deleteDocument(UUID id) {
-        embeddingCacheService.evictDocument(id);
-        documentRepository.deleteByDocumentId(id);
-        log.info("Document deleted: {}", id);
+        log.info("Starting delete for document: {}", id);
+
+        DocumentInfo docInfo = documentStore.get(id);
+        if (docInfo == null) {
+            log.warn("Document not found: {}", id);
+            throw new DocumentNotFoundException("Документ с id " + id + " не найден");
+        }
+
+        try {
+            documentRepository.deleteByDocumentId(id);
+            log.info("Successfully deleted from Qdrant: {}", id);
+        } catch (Exception e) {
+            log.error("Failed to delete from Qdrant. Document {} remains in system.", id, e);
+            throw new QdrantException(
+                    "Не удалось удалить документ из векторной БД. " +
+                            "Повторите попытку позже. ", e);
+        }
+
+        try {
+            embeddingCacheService.evictDocument(id);
+            documentStore.remove(id);
+            log.info("Document fully deleted: {}", id);
+        } catch (Exception e) {
+            log.warn("Failed to evict from cache: {}", id, e);
+        }
     }
 
     private DocumentParser getParser(String fileName) {

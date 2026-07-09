@@ -2,6 +2,10 @@ package ru.neoflex.rag.repository;
 
 import static io.qdrant.client.ConditionFactory.matchKeyword;
 
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
+import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
@@ -12,12 +16,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
+import ru.neoflex.rag.exception.QdrantException;
+import ru.neoflex.rag.exception.RetryableException;
 import ru.neoflex.rag.model.entity.DocumentInfo;
 import ru.neoflex.rag.model.entity.DocumentStatus;
 
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -36,13 +45,26 @@ public class QdrantDocumentRepository {
     private final VectorStore vectorStore;
     private final QdrantClient qdrantClient;
 
+    @Value("${client.qdrant.timeout:5s}")
+    private String qdrantTimeout;
+
     /**
      * Сохраняет документы в векторную БД.
      * Использует Spring AI VectorStore.
      */
+    @Retry(name = "qdrantRetry")
+    @CircuitBreaker(name = "qdrantCircuitBreaker")
+    @TimeLimiter(name = "qdrantTimeLimiter")
+    @Bulkhead(name = "qdrantBulkhead")
     public void save(List<Document> documents) {
-        vectorStore.add(documents);
-        log.info("Saved {} documents to Qdrant", documents.size());
+        try{
+            vectorStore.add(documents);
+            log.info("Saved {} documents to Qdrant", documents.size());
+        } catch (Exception e) {
+            log.error("Failed to save to Qdrant", e);
+            throw new RetryableException("Failed to save  documents to Qdrant", e);
+        }
+
     }
 
     /**
@@ -54,22 +76,41 @@ public class QdrantDocumentRepository {
      * @param threshold порог сходства (0.0 - 1.0)
      * @return список найденных документов
      */
+    @Retry(name = "qdrantRetry", fallbackMethod = "searchFallback")
+    @CircuitBreaker(name = "qdrantCircuitBreaker", fallbackMethod = "searchFallback")
+    @TimeLimiter(name = "qdrantTimeLimiter")
+    @Bulkhead(name = "qdrantBulkhead")
     public List<Document> search(String query, int topK, double threshold) {
-        SearchRequest request = SearchRequest.builder()
-                .query(query)
-                .topK(topK)
-                .similarityThreshold(threshold)
-                .build();
+        try{
+            SearchRequest request = SearchRequest.builder()
+                    .query(query)
+                    .topK(topK)
+                    .similarityThreshold(threshold)
+                    .build();
 
-        List<Document> results = vectorStore.similaritySearch(request);
-        log.info("Found {} documents for query: {}", results.size(), query);
-        return results;
+            List<Document> results = vectorStore.similaritySearch(request);
+            log.info("Found {} documents for query: {}", results.size(), query);
+            return results;
+        } catch (Exception e) {
+            log.error("Search failed for query: {}", query, e);
+            throw new RetryableException("Search failed: " + query, e);
+        }
+
+    }
+
+    public List<Document> searchFallback(String query, int topK, double threshold, Exception e) {
+        log.warn("Search fallback activated for query: {}", query);
+        return Collections.emptyList();
     }
 
     /**
      * Удаляет все чанки документа по его идентификатору.
      * Использует Qdrant Client для удаления по фильтру.
      */
+    @Retry(name = "qdrantRetry", fallbackMethod = "deleteFallback")
+    @CircuitBreaker(name = "qdrantCircuitBreaker", fallbackMethod = "deleteFallback")
+    @TimeLimiter(name = "qdrantTimeLimiter")
+    @Bulkhead(name = "qdrantBulkhead")
     public void deleteByDocumentId(UUID documentId) {
         try {
             Points.Filter filter = Points.Filter.newBuilder()
@@ -85,13 +126,24 @@ public class QdrantDocumentRepository {
                     .setPoints(pointsSelector)
                     .build();
 
-            qdrantClient.deleteAsync(deletePoints).get();
+            qdrantClient.deleteAsync(deletePoints).get(parseTimeout(qdrantTimeout), TimeUnit.SECONDS);
 
             log.info("Deleted all chunks for document: {}", documentId);
+        } catch (TimeoutException e) {
+            log.error("Timeout deleting document from Qdrant: {}", documentId, e);
+            throw new RetryableException("Qdrant timeout for document: " + documentId, e);
         } catch (InterruptedException | ExecutionException e) {
-            log.error("Failed to delete document: {}", documentId, e);
-            throw new RuntimeException("Failed to delete document: " + documentId, e);
+            log.error("Failed to delete document from Qdrant: {}", documentId, e);
+            throw new RetryableException("Qdrant error: " + documentId, e);
         }
+    }
+
+    public void deleteFallback(UUID documentId, Exception e) {
+        log.error("Delete fallback for document: {}", documentId, e);
+        throw new QdrantException(
+                "Failed to delete document from Qdrant after retries: " + documentId,
+                e
+        );
     }
 
     /**
@@ -154,5 +206,10 @@ public class QdrantDocumentRepository {
             log.error("Failed to get all documents", e);
             return Collections.emptyList();
         }
+    }
+
+    private long parseTimeout(String timeoutStr) {
+        String value = timeoutStr.replace("s", "").replace("ms", "");
+        return Long.parseLong(value);
     }
 }

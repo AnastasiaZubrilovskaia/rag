@@ -2,6 +2,7 @@ package ru.neoflex.rag.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,12 +16,16 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class WebSearchService {
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${searxng.base-url:http://localhost:8888}")
     private String searxngBaseUrl;
 
+    @Value("${client.searxng.timeout:10s}")
+    private String timeout;
+
+    @Retry(name = "searxngRetry", fallbackMethod = "searchFallback")
     public List<String> search(String query) {
         try {
             String url = searxngBaseUrl + "/search?q=" + query + "&format=json&categories=general";
@@ -51,8 +56,13 @@ public class WebSearchService {
 
         } catch (Exception e) {
             log.error("Web search failed: {}", e.getMessage());
-            return List.of();
+            throw new RuntimeException("Web search failed", e);
         }
+    }
+
+    public List<String> searchFallback(String query, Exception e) {
+        log.warn("Web search fallback for query: {}", query);
+        return List.of();
     }
 
     public boolean isAvailable() {

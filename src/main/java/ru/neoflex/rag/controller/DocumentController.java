@@ -1,7 +1,7 @@
 package ru.neoflex.rag.controller;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import ru.neoflex.rag.model.response.DocumentResponse;
@@ -16,18 +16,21 @@ import java.util.UUID;
 public class DocumentController {
     private final DocumentService documentService;
 
-    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public DocumentResponse upload(@RequestParam("file") MultipartFile file) {
-        return documentService.upload(file);
+    @PostMapping(value = "/upload", consumes = "multipart/form-data")
+    public ResponseEntity<DocumentResponse> upload(@RequestParam("file") MultipartFile file) {
+        DocumentResponse response = documentService.upload(file);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping
-    public List<DocumentResponse> getDocuments() {
-        return documentService.getDocuments();
+    public ResponseEntity<List<DocumentResponse>> getDocuments() {
+        List<DocumentResponse> documents = documentService.getDocuments();
+        return ResponseEntity.ok(documents);
     }
 
     @DeleteMapping("/{id}")
-    public void deleteDocument(@PathVariable UUID id) {
+    public ResponseEntity<Void> deleteDocument(@PathVariable UUID id) {
         documentService.deleteDocument(id);
+        return ResponseEntity.noContent().build();
     }
 }
