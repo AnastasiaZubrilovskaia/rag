@@ -132,3 +132,5 @@ resilience4j:
 logging:
   level:
     org.springframework.ai: DEBUG
+  pattern:
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:%5p}) %clr([%X{request_id}]){cyan} %clr(---){faint} %clr([%t]){faint} %clr(%logger{39}){faint} %m%n"
