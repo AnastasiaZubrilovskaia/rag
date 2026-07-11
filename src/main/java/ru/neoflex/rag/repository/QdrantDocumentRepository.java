@@ -5,7 +5,6 @@ import static io.qdrant.client.ConditionFactory.matchKeyword;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
-import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
@@ -54,7 +53,6 @@ public class QdrantDocumentRepository {
      */
     @Retry(name = "qdrantRetry")
     @CircuitBreaker(name = "qdrantCircuitBreaker")
-    @TimeLimiter(name = "qdrantTimeLimiter")
     @Bulkhead(name = "qdrantBulkhead")
     public void save(List<Document> documents) {
         try{
@@ -78,7 +76,6 @@ public class QdrantDocumentRepository {
      */
     @Retry(name = "qdrantRetry", fallbackMethod = "searchFallback")
     @CircuitBreaker(name = "qdrantCircuitBreaker", fallbackMethod = "searchFallback")
-    @TimeLimiter(name = "qdrantTimeLimiter")
     @Bulkhead(name = "qdrantBulkhead")
     public List<Document> search(String query, int topK, double threshold) {
         try{
@@ -109,7 +106,6 @@ public class QdrantDocumentRepository {
      */
     @Retry(name = "qdrantRetry", fallbackMethod = "deleteFallback")
     @CircuitBreaker(name = "qdrantCircuitBreaker", fallbackMethod = "deleteFallback")
-    @TimeLimiter(name = "qdrantTimeLimiter")
     @Bulkhead(name = "qdrantBulkhead")
     public void deleteByDocumentId(UUID documentId) {
         try {

@@ -226,11 +226,17 @@ public class RagService {
     private List<SourceInfo> buildSources(List<Document> documents) {
         List<SourceInfo> sources = new ArrayList<>();
         for (Document doc : documents) {
+            Object positionValue = doc.getMetadata().getOrDefault("position", 0);
+            int position = positionValue instanceof Number number ? number.intValue() : 0;
+
+            Object scoreValue = doc.getMetadata().getOrDefault("score", 0.0);
+            double score = scoreValue instanceof Number number ? number.doubleValue() : 0.0;
+
             sources.add(SourceInfo.builder()
                     .documentId((String) doc.getMetadata().getOrDefault("documentId", "unknown"))
                     .fileName((String) doc.getMetadata().getOrDefault("fileName", "unknown"))
-                    .position((Integer) doc.getMetadata().getOrDefault("position", 0))
-                    .score((Double) doc.getMetadata().getOrDefault("score", 0.0))
+                    .position(position)
+                    .score(score)
                     .text(doc.getText())
                     .build());
         }

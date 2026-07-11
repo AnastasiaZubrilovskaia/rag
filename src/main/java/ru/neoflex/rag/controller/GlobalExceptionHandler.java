@@ -1,8 +1,11 @@
 package ru.neoflex.rag.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import ru.neoflex.rag.exception.DocumentNotFoundException;
@@ -50,9 +53,32 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    @ExceptionHandler(HttpMessageNotWritableException.class)
+    public ResponseEntity<?> handleHttpMessageNotWritable(HttpMessageNotWritableException e, HttpServletRequest request) {
+        log.error("Streaming response write error", e);
+        String accept = request.getHeader("Accept");
+        if (accept != null && accept.contains(MediaType.TEXT_EVENT_STREAM_VALUE)) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Internal server error");
+        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of(
+                        "error", "INTERNAL_ERROR",
+                        "message", "Внутренняя ошибка сервера",
+                        "timestamp", System.currentTimeMillis()
+                ));
+    }
+
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleGenericException(Exception e) {
+    public ResponseEntity<?> handleGenericException(Exception e, HttpServletRequest request) {
         log.error("Unexpected error", e);
+        String accept = request.getHeader("Accept");
+        if (accept != null && accept.contains(MediaType.TEXT_EVENT_STREAM_VALUE)) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Internal server error");
+        }
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of(
