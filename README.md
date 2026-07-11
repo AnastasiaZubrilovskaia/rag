@@ -1,8 +1,8 @@
 # RAG-сервис (Retrieval-Augmented Generation)
 
-RAG-сервис для загрузки документов, их индексации и генерации ответов с использованием гибридного подхода: эмбеддинги локально, генерация через облачную LLM.   
+RAG-сервис для загрузки документов, их индексации и генерации ответов с использованием гибридного подхода: эмбеддинги локально, генерация через облачную LLM.
 
-Эмбеддинги для документов создаются с помощью модели **nomic-embed-text**, запущенной локально в Ollama, и сохраняются в **Qdrant**. При поступлении пользовательского запроса выполняется семантический поиск релевантных фрагментов, после чего найденный контекст передается облачной LLM **glm-4.7:cloud** (Ollama Cloud) для генерации ответа.
+Эмбеддинги для документов создаются с помощью модели **nomic-embed-text**, запущенной локально в Ollama, и сохраняются в **Qdrant**. При поступлении пользовательского запроса сервис извлекает последний вопрос, учитывает историю диалога, выполняет поиск релевантных фрагментов, применяет защитные и качественные фильтры, а затем передает контекст облачной LLM **glm-4.7:cloud**.
 
 ---
 
@@ -10,21 +10,85 @@ RAG-сервис для загрузки документов, их индекс
 
 ## Возможности
 
-- Загрузка документов (`.txt`, `.md`, `.pdf`, `.docx`)
-- Разбиение документов на чанки с настраиваемым размером и перекрытием
+- Загрузка документов в форматах `.txt`, `.md`, `.pdf`, `.docx`, `.html`, `.htm`
+- Асинхронная обработка документов (`CompletableFuture`)
+- Нормализация текста перед индексацией
+- Разбиение на чанки с учётом границ слов и настраиваемым overlap
 - Генерация эмбеддингов через Ollama (`nomic-embed-text`)
-- Кэширование эмбеддингов для повторного использования
-- Хранение документов и эмбеддингов в Qdrant
+- Внутренний кэш эмбеддингов с ограничением размера и очисткой при удалении документа
+- Хранение чанков и метаданных в Qdrant
 - Семантический поиск релевантных фрагментов
-- Генерация ответов на основе найденного контекста через облачную LLM
-- Потоковая передача ответов (stream=true, SSE)
-- Асинхронная обработка документов (CompletableFuture)
-- Веб-поиск как fallback при недостатке контекста (SearXNG)
-- Удаление документов из Qdrant
+- Поддержка диалога: история сообщений передается в промпт, поиск выполняется по последнему вопросу
+- Классификация запросов: `CHAT`-реплики могут обходить RAG-поиск
+- Защита от prompt injection из контекста документов
+- Exact-term guard для технических токенов (`/path`, `*.md`, `CONSTANT_CASE`, `CamelCase`)
+- Двухуровневый фильтр качества источников (`strong` / `borderline`)
+- Веб-поиск через SearXNG как fallback при недостатке контекста
+- Переключение стиля ответа через суффикс имени модели: `-simple`, `-eli5`
+- Потоковая передача ответа (`stream=true`, SSE)
 - OpenAI-совместимый REST API
-- Swagger/OpenAPI документация
+- Диагностический endpoint `/rag/debug`
+- `request_id`, список источников и тайминги в ответе
+- Таймауты, retry, circuit breaker, time limiter и bulkhead через Resilience4j
+- Обработка квоты Ollama (`HTTP 429`) с извлечением `Retry-After`
+- Swagger / OpenAPI документация
 - Docker Compose для быстрого запуска
-- Unit-тесты с покрытием сервисного слоя ~87%
+- Unit-тесты сервисного слоя
+
+---
+
+## Что было доработано
+
+Ниже перечислены ключевые доработки, внесенные после технической проверки:
+
+1. **Чанкинг текста**
+   - текст нормализуется перед разбиением;
+   - чанки не обрезаются посреди слова;
+   - сохраняется перекрытие между соседними фрагментами.
+
+2. **Кэш эмбеддингов**
+   - кэш ограничен по размеру;
+   - при удалении документа связанные записи удаляются из кэша.
+
+3. **Защита от инъекций через документы**
+   - контекст передается в отдельной секции как данные;
+   - системный промпт явно запрещает следовать инструкциям из контекста.
+
+4. **Поддержка диалога**
+   - в промпт передается история сообщений;
+   - поиск строится по последнему вопросу пользователя.
+
+5. **Поддержка HTML**
+   - добавлен парсер `.html` / `.htm`;
+   - используется `Jsoup` + `Boilerpipe` для извлечения основного текста страницы.
+
+6. **Консистентное удаление**
+   - документ сначала удаляется из Qdrant;
+   - только после успешного удаления очищается внутреннее состояние сервиса и кэш.
+
+7. **Отказоустойчивость**
+   - настроены таймауты на обращения к Qdrant, Ollama и SearXNG;
+   - добавлены retry / circuit breaker / time limiter / bulkhead.
+
+8. **Условный запуск RAG**
+   - перед поиском выполняется классификация запроса;
+   - короткие chat-запросы могут не проходить через RAG-конвейер.
+
+9. **Стили ответа**
+   - поддерживаются режимы `EXPERT`, `SIMPLE`, `ELI5`;
+   - стиль выбирается по суффиксу имени модели.
+
+10. **Обработка `HTTP 429`**
+    - перехватываются ошибки квоты Ollama;
+    - извлекается `Retry-After` из заголовка или тела ответа.
+
+11. **Прозрачность ответа**
+    - в ответ добавлены `request_id`, `sources`, `timings`;
+    - при отсутствии контекста LLM не вызывается, возвращается честный ответ без генерации.
+
+12. **Дополнительные защитные фильтры**
+    - реализован exact-term guard;
+    - добавлен диагностический endpoint `/rag/debug` для анализа пайплайна.
 
 ---
 
@@ -39,6 +103,9 @@ RAG-сервис для загрузки документов, их индекс
 | Springdoc OpenAPI | 2.8.9 |
 | Apache PDFBox | 3.0.3 |
 | Apache POI | 5.3.0 |
+| Jsoup | 1.18.3 |
+| Boilerpipe | 1.1.0 |
+| Resilience4j | 2.2.0 |
 | Ollama (локальный) | latest |
 | Ollama Cloud | — |
 | Qdrant | latest |
@@ -94,7 +161,7 @@ docker compose up --build
 | OpenAPI | http://localhost:8080/v3/api-docs |
 | Open WebUI | http://localhost:3000 |
 | Qdrant Dashboard | http://localhost:6333/dashboard |
-| SearXNG| http://localhost:8888 |
+| SearXNG | http://localhost:8888 |
 
 ---
 
@@ -109,6 +176,46 @@ ollama serve
 ```bash
 ollama pull nomic-embed-text
 ollama list
+```
+
+---
+
+## 5. Базовые настройки
+
+Основные параметры в `application.yaml`:
+
+```yaml
+rag:
+  chunk-size: 1000
+  chunk-overlap: 200
+  search:
+    top-k: 5
+    similarity-threshold: 0.7
+  web-search:
+    enabled: false
+    min-documents: 1
+    results-limit: 3
+  filter:
+    strong-threshold: 0.75
+    borderline-threshold: 0.6
+    min-context-sources: 2
+    exact-term-guard-enabled: true
+```
+
+Таймауты внешних вызовов:
+
+```yaml
+spring:
+  ai:
+    ollama:
+      chat:
+        timeout: 30s
+
+qdrant:
+  timeout: 5s
+
+searxng:
+  timeout: 10s
 ```
 
 ---
@@ -182,6 +289,8 @@ multipart/form-data
 - `.md`
 - `.pdf`
 - `.docx`
+- `.html`
+- `.htm`
 
 ### Ответ
 
@@ -229,6 +338,8 @@ GET /api/documents
 DELETE /api/documents/{id}
 ```
 
+Если удалить документ из Qdrant не удалось, запрос завершится ошибкой, а локальное состояние сервиса не будет очищено.
+
 ---
 
 ## Генерация ответа
@@ -237,20 +348,24 @@ DELETE /api/documents/{id}
 POST /v1/chat/completions
 ```
 
-### Пример запроса (обычный режим)
+### Особенности
+
+- в поиск уходит **последнее сообщение пользователя**;
+- история диалога добавляется в промпт;
+- стиль ответа выбирается по имени модели:
+  - `glm-4.7:cloud` -> экспертный режим;
+  - `glm-4.7:cloud-simple` -> простой стиль;
+  - `glm-4.7:cloud-eli5` -> объяснение "как для ребёнка".
+
+### Пример запроса
 
 ```json
 {
   "model": "glm-4.7:cloud",
   "messages": [
-    {
-      "role": "user",
-      "content": "Что такое Spring Boot?"
-    }
+    {"role": "user", "content": "Что такое @SpringBootApplication?"}
   ],
-  "stream": false,
-  "temperature": 0.1,
-  "maxTokens": 512
+  "stream": false
 }
 ```
 
@@ -258,16 +373,16 @@ POST /v1/chat/completions
 
 ```json
 {
-  "id": "chatcmpl-3dd9a93c-5429-4a01-bb06-cb3e3f07c7d3",
+  "id": "chatcmpl-e9b8d85c",
   "object": "chat.completion",
-  "created": 1782652546,
-  "model": "qwen2.5:7b",
+  "created": 1783803820,
+  "model": "glm-4.7:cloud",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "Spring Boot — это Java-фреймворк, который автоматически конфигурирует приложение. Источник: txt1.txt"
+        "content": "@SpringBootApplication — это аннотация для автоконфигурации Spring Boot.\nИсточник: test.txt"
       },
       "finish_reason": "stop"
     }
@@ -276,6 +391,29 @@ POST /v1/chat/completions
     "prompt_tokens": 0,
     "completion_tokens": 0,
     "total_tokens": 0
+  },
+  "request_id": "req-270e4a4b",
+  "sources": [
+    {
+      "documentId": "e59e5d5e-cf54-4e58-8da1-274ae9440fe3",
+      "fileName": "test.txt",
+      "position": 0,
+      "score": 1,
+      "text": "@SpringBootApplication — это аннотация для автоконфигурации Spring Boot."
+    },
+    {
+      "documentId": "459749a0-9de0-40c0-99a2-823c4cda89bc",
+      "fileName": "txt1.txt",
+      "position": 0,
+      "score": 0,
+      "text": "Spring Boot — это Java-фреймворк. Spring Boot автоматически конфигурирует приложение. Bean создается контейнером Spring."
+    }
+  ],
+  "timings": {
+    "retrieval_ms": 7041,
+    "prompt_ms": 2,
+    "generation_ms": 2494,
+    "total_ms": 9541
   }
 }
 ```
@@ -285,14 +423,9 @@ POST /v1/chat/completions
 {
   "model": "glm-4.7:cloud",
   "messages": [
-    {
-      "role": "user",
-      "content": "Что такое Spring Boot?"
-    }
+    {"role": "user", "content": "Что такое @SpringBootApplication?"}
   ],
-  "stream": true,
-  "temperature": 0.1,
-  "maxTokens": 512
+  "stream": true
 }
 ```
 Ответ (потоковый режим): Server-Sent Events (SSE)
@@ -319,7 +452,7 @@ rag:
 # Тестирование
 
 - Unit-тесты на сервисный слой.
-- Общее покрытие: ~87%.
+- Общее покрытие: ~57%.
 
 ## Через Swagger
 
@@ -389,11 +522,14 @@ src
 │   │   └── ru/neoflex/rag
 │   │       ├── config
 │   │       ├── controller
+│   │       ├── filter
+│   │       ├── interceptor
 │   │       ├── model
 │   │       ├── parser
 │   │       ├── properties
 │   │       ├── repository
-│   │       └── service
+│   │       ├── service
+│   │       └── util
 │   └── resources
 │       └── application.yaml
 ├── Dockerfile
@@ -401,51 +537,57 @@ src
 └── pom.xml
 ```
 
+---
+
 # Архитектура
 
 ```
 Документ
     │
     ▼
-Парсер (.txt/.md/.pdf/.docx)
+Парсер (.txt / .md / .pdf / .docx / .html)
     │
     ▼
-Асинхронная обработка (CompletableFuture)
+Нормализация текста
     │
     ▼
-Chunking
+Chunking с учетом границ слов и overlap
     │
     ▼
-Проверка кэша эмбеддингов
-    │
-    ├─── Если есть в кэше → берем из кэша
-    │
-    └─── Если нет → Ollama Embedding (nomic-embed-text) → сохраняем в кэш
-    │
-    ▼
-Qdrant
+Индексация в Qdrant
 
-───────────────
+────────────────────────────────────────
 
-Запрос пользователя
+История сообщений + последний вопрос
     │
     ▼
-Similarity Search в Qdrant
+Классификация запроса (CHAT / SEARCH)
     │
-    ▼
-Достаточно документов?
+    ├── CHAT ──► обычный ответ без retrieval
     │
-    ├─── Да → Формирование промпта с контекстом
-    │
-    └─── Нет → Веб-поиск (SearXNG) → добавляем в контекст
-    │
-    ▼
-Ollama Cloud (glm-4.7:cloud)
-    │
-    ├─── stream=false → JSON
-    │
-    └─── stream=true → SSE (Server-Sent Events)
-    │
-    ▼
-Ответ пользователю
+    └── SEARCH
+           │
+           ▼
+           Similarity Search в Qdrant
+           │
+           ▼
+           Exact-term guard
+           │
+           ▼
+           Двухуровневый фильтр качества источников
+           │
+           ├── Нет допустимого контекста ──► no_context, LLM не вызывается
+           │
+           └── Контекст допустим
+                  │
+                  ├── при необходимости ► Web Search (SearXNG)
+                  │
+                  ▼
+                  Формирование защищенного промпта
+                  │
+                  ▼
+                  Ollama Cloud (glm-4.7:cloud / -simple / -eli5)
+                  │
+                  ├── stream=false ► JSON + request_id + sources + timings
+                  └── stream=true  ► SSE
 ```
