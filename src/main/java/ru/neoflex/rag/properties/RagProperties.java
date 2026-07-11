@@ -14,6 +14,7 @@ public class RagProperties {
     private Integer chunkOverlap;
     private Search search;
     private WebSearch webSearch;
+    private Filter filter;
 
     @Getter
     @Setter
@@ -28,5 +29,14 @@ public class RagProperties {
         private boolean enabled;
         private int minDocuments;
         private int resultsLimit;
+    }
+
+    @Getter
+    @Setter
+    public static class Filter {
+        private Double strongThreshold;
+        private Double borderlineThreshold;
+        private Integer minContextSources;
+        private boolean exactTermGuardEnabled;
     }
 }

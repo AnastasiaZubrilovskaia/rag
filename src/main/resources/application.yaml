@@ -46,6 +46,11 @@ rag:
     enabled: false
     min-documents: 1
     results-limit: 3
+  filter:
+    strong-threshold: 0.75
+    borderline-threshold: 0.6
+    min-context-sources: 2
+    exact-term-guard-enabled: true
 
 searxng:
   base-url: http://searxng:8080

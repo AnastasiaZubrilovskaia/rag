@@ -12,6 +12,7 @@ import reactor.core.publisher.Flux;
 import ru.neoflex.rag.exception.QuotaExceededException;
 import ru.neoflex.rag.model.entity.AnswerStyle;
 import ru.neoflex.rag.model.request.ChatCompletionRequest;
+import ru.neoflex.rag.model.response.DebugResponse;
 import ru.neoflex.rag.model.response.SourceInfo;
 import ru.neoflex.rag.model.response.TimingInfo;
 import ru.neoflex.rag.model.response.chat.ChatCompletionResponse;
@@ -19,6 +20,7 @@ import ru.neoflex.rag.model.response.chat.ChatResponseMessage;
 import ru.neoflex.rag.model.response.chat.Choice;
 import ru.neoflex.rag.model.response.chat.Usage;
 import ru.neoflex.rag.properties.RagProperties;
+import ru.neoflex.rag.util.TechnicalTokenExtractor;
 import ru.neoflex.rag.util.TimingTracker;
 
 import java.time.Instant;
@@ -37,6 +39,8 @@ public class RagService {
     private final RagProperties ragProperties;
     private final WebSearchService webSearchService;
     private final QueryClassifier queryClassifier;
+    private final FilterService filterService;
+    private final TechnicalTokenExtractor tokenExtractor;
 
     private static final String REQUEST_ID_KEY = "request_id";
 
@@ -171,9 +175,16 @@ public class RagService {
                     ragProperties.getSearch().getSimilarityThreshold()
             );
 
+            documents = filterService.applyExactTermGuard(question, documents);
             sources.addAll(buildSources(documents));
 
-            if (ragProperties.getWebSearch().isEnabled() && shouldUseWebSearch(documents)) {
+            FilterService.FilterResult filterResult = filterService.applyFilter(documents);
+            if (!filterResult.isAllowed()) {
+                log.info("[{}] Filter blocked generation: {}", getRequestId(), filterResult.getReason());
+                documents = List.of();
+            }
+
+            if (!documents.isEmpty() && ragProperties.getWebSearch().isEnabled() && shouldUseWebSearch(documents)) {
                 webResults = webSearchService.search(question);
             }
         } else {
@@ -358,6 +369,9 @@ public class RagService {
      * Строит обычный SSE чанк
      */
     private String buildStreamChunk(String model, String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return null;
+        }
         return "data: " + """
         {
             "id": "chatcmpl-%s",
@@ -455,6 +469,52 @@ public class RagService {
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
     }
+
+    /**
+     * Диагностический метод для отладки RAG-пайплайна
+     */
+    public DebugResponse debug(ChatCompletionRequest request) {
+        String requestId = getRequestId();
+        TimingTracker timings = new TimingTracker();
+
+        String question = questionExtractor.extractLastQuestion(request);
+
+        timings.startRetrieval();
+        List<Document> documents = vectorStoreService.search(
+                question,
+                ragProperties.getSearch().getTopK(),
+                ragProperties.getSearch().getSimilarityThreshold()
+        );
+        timings.endRetrieval();
+
+        List<SourceInfo> sources = buildSources(documents);
+
+        List<String> tokens = new ArrayList<>();
+        if (ragProperties.getFilter() != null && ragProperties.getFilter().isExactTermGuardEnabled()) {
+            tokens = tokenExtractor.extractTokens(question);
+        }
+
+        List<Document> filteredDocs = filterService.applyExactTermGuard(question, documents);
+        FilterService.FilterResult filterResult = filterService.applyFilter(filteredDocs);
+
+        return DebugResponse.builder()
+                .requestId(requestId)
+                .question(question)
+                .sources(sources)
+                .timings(TimingInfo.builder()
+                        .retrievalMs(timings.getRetrievalMs())
+                        .promptMs(0L)
+                        .generationMs(0L)
+                        .totalMs(timings.getTotalMs())
+                        .build())
+                .exactTermMatch(!filteredDocs.isEmpty())
+                .filterLevel(filterResult.getLevel())
+                .generationAllowed(filterResult.isAllowed())
+                .message(filterResult.getReason())
+                .extractedTokens(tokens)
+                .build();
+    }
+
 
     @lombok.Builder
     @lombok.Getter
