@@ -96,11 +96,19 @@ public class DocumentService {
     public void deleteDocument(UUID id) {
         log.info("Starting delete for document: {}", id);
 
-        DocumentInfo docInfo = documentStore.get(id);
-        if (docInfo == null) {
-            log.warn("Document not found: {}", id);
+        boolean existsInQdrant = false;
+        try {
+            List<DocumentInfo> qdrantDocs = documentRepository.getAllDocuments();
+            existsInQdrant = qdrantDocs.stream()
+                    .anyMatch(doc -> doc.getId().equals(id));
+        } catch (Exception e) {
+            log.warn("Failed to check Qdrant for document: {}", id, e);
+        }
+        if (!existsInQdrant) {
+            log.warn("Document not found in Qdrant: {}", id);
             throw new DocumentNotFoundException("Документ с id " + id + " не найден");
         }
+
 
         try {
             documentRepository.deleteByDocumentId(id);

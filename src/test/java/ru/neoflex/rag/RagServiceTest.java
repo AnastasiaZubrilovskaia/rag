@@ -195,6 +195,48 @@ class RagServiceTest {
     }
 
     @Test
+    void shouldHandleLongMetadataPositionInSources() {
+        ChatCompletionRequest request = new ChatCompletionRequest();
+        request.setModel("qwen2.5:7b");
+        request.setMessages(List.of(new ChatMessage()));
+
+        when(questionExtractor.extractLastQuestion(any())).thenReturn("test question");
+        when(questionExtractor.buildHistory(any())).thenReturn("");
+        when(queryClassifier.isChat(any())).thenReturn(false);
+
+        RagProperties.Search search = new RagProperties.Search();
+        search.setTopK(5);
+        search.setSimilarityThreshold(0.7);
+        when(ragProperties.getSearch()).thenReturn(search);
+
+        RagProperties.WebSearch webSearch = new RagProperties.WebSearch();
+        webSearch.setEnabled(false);
+        webSearch.setMinDocuments(1);
+        when(ragProperties.getWebSearch()).thenReturn(webSearch);
+
+        when(vectorStoreService.search(any(), anyInt(), anyDouble()))
+                .thenReturn(List.of(new Document("test content", Map.of(
+                        "documentId", "doc-1",
+                        "fileName", "test.txt",
+                        "position", 42L,
+                        "score", 0.91
+                ))));
+
+        when(promptBuilder.build(any(), any(), any(), any(), any(AnswerStyle.class))).thenReturn("prompt");
+
+        AssistantMessage assistantMessage = new AssistantMessage("test answer");
+        Generation generation = new Generation(assistantMessage);
+        ChatResponse chatResponse = new ChatResponse(List.of(generation));
+        when(ollamaChatService.call(any())).thenReturn(chatResponse);
+
+        ChatCompletionResponse response = ragService.chat(request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getSources()).hasSize(1);
+        assertThat(response.getSources().get(0).getPosition()).isEqualTo(42);
+    }
+
+    @Test
     void shouldUseWebSearchInStreamWhenNoDocumentsFound() {
         ChatCompletionRequest request = new ChatCompletionRequest();
         request.setModel("qwen2.5:7b");
