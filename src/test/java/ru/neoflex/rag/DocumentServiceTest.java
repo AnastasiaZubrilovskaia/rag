@@ -72,7 +72,6 @@ class DocumentServiceTest {
         assertThat(response.getChunkCount()).isEqualTo(0);
 
         Thread.sleep(100);
-
         verify(indexingService, timeout(1000)).indexDocument(any(), any(), any());
     }
 
@@ -104,19 +103,25 @@ class DocumentServiceTest {
         parsers.add(parser);
 
         DocumentResponse uploadResponse = documentService.upload(file);
-        UUID docId = uploadResponse.getId();
-        doNothing().when(repository).deleteByDocumentId(docId);
-        doNothing().when(embeddingCacheService).evictDocument(docId);
+        UUID id = uploadResponse.getId();
 
-        documentService.deleteDocument(docId);
+        List<DocumentInfo> qdrantDocs = List.of(
+                DocumentInfo.builder().id(id).fileName("test.txt").status(DocumentStatus.COMPLETED).chunkCount(1).build()
+        );
+        when(repository.getAllDocuments()).thenReturn(qdrantDocs);
+        doNothing().when(repository).deleteByDocumentId(id);
+        doNothing().when(embeddingCacheService).evictDocument(id);
 
-        verify(repository).deleteByDocumentId(docId);
-        verify(embeddingCacheService).evictDocument(docId);
+        documentService.deleteDocument(id);
+
+        verify(repository).deleteByDocumentId(id);
+        verify(embeddingCacheService).evictDocument(id);
     }
 
     @Test
     void shouldThrowExceptionWhenDeletingNonExistentDocument() {
         UUID nonExistentId = UUID.randomUUID();
+        when(repository.getAllDocuments()).thenReturn(List.of());
 
         assertThatThrownBy(() -> documentService.deleteDocument(nonExistentId))
                 .isInstanceOf(DocumentNotFoundException.class)
