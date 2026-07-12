@@ -140,7 +140,13 @@ public class RagService {
         timings.startGeneration();
 
         return ollamaChatService.stream(new Prompt(new UserMessage(prompt)))
-                .map(chunk -> buildStreamChunk(request.getModel(), chunk.getResult().getOutput().getText()))
+                .flatMap(chunk -> {
+                    String content = chunk.getResult().getOutput().getText();
+                    if (content == null || content.trim().isEmpty()) {
+                        return Flux.empty();
+                    }
+                    return Flux.just(buildStreamChunk(request.getModel(), content));
+                })
                 .concatWith(Flux.just(buildStreamDone()))
                 .onErrorResume(QuotaExceededException.class, e -> {
                     log.error("[{}] Quota exceeded during streaming", finalRequestId, e);
