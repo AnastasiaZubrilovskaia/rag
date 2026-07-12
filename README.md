@@ -25,7 +25,7 @@ RAG-сервис для загрузки документов, их индекс
 - Двухуровневый фильтр качества источников (`strong` / `borderline`)
 - Веб-поиск через SearXNG как fallback при недостатке контекста
 - Переключение стиля ответа через суффикс имени модели: `-simple`, `-eli5`
-- Потоковая передача ответа (`stream=true`, SSE)
+- Потоковая передача ответа через отдельный endpoint `/v1/chat/completions-stream` (SSE)
 - OpenAI-совместимый REST API
 - Диагностический endpoint `/rag/debug`
 - `request_id`, список источников и тайминги в ответе
@@ -417,6 +417,12 @@ POST /v1/chat/completions
   }
 }
 ```
+## Генерация ответа (потоковый режим)
+
+```
+POST /v1/chat/completions-stream
+```
+
 ### Пример запроса (потоковый режим)
 
 ```json
@@ -497,7 +503,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 ### Потоковый запрос: к LLM
 
 ```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8080/v1/chat/completions-stream \
 -H "Content-Type: application/json" \
 -d '{
   "model":"glm-4.7:cloud",
@@ -588,6 +594,6 @@ Chunking с учетом границ слов и overlap
                   ▼
                   Ollama Cloud (glm-4.7:cloud / -simple / -eli5)
                   │
-                  ├── stream=false ► JSON + request_id + sources + timings
-                  └── stream=true  ► SSE
+                  ├── /v1/chat/completions ► JSON + request_id + sources + timings
+                  └── /v1/chat/completions-stream ► SSE
 ```
