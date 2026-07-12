@@ -1,18 +1,19 @@
 package ru.neoflex.rag.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import ru.neoflex.rag.model.request.ChatCompletionRequest;
 import ru.neoflex.rag.model.response.chat.ChatCompletionResponse;
 import ru.neoflex.rag.service.RagService;
+import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,47 +24,44 @@ import java.nio.charset.StandardCharsets;
 @RequestMapping("/v1")
 public class ChatController {
     private final RagService ragService;
+    private final ObjectMapper objectMapper;
 
-    @PostMapping(value = "/chat/completions",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ChatCompletionResponse> chat(@Valid @RequestBody ChatCompletionRequest request) {
-        log.info("Chat request: model={}, messages={}",
+    @PostMapping(value = "/chat/completions", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public void chat(@Valid @RequestBody ChatCompletionRequest request, HttpServletResponse response) throws IOException {
+        log.info("Chat request: model={}, messages={}, stream={}",
                 request.getModel(),
-                request.getMessages().size());
+                request.getMessages().size(),
+                request.getStream());
 
-        return ResponseEntity.ok(ragService.chat(request));
-    }
+        if (Boolean.TRUE.equals(request.getStream())) {
+            response.setStatus(HttpServletResponse.SC_OK);
+            response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
 
-    @PostMapping(value = "/chat/completions-stream",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<StreamingResponseBody> chatStream(@Valid @RequestBody ChatCompletionRequest request) {
-        log.info("Chat stream request: model={}, messages={}",
-                request.getModel(),
-                request.getMessages().size());
-
-        StreamingResponseBody responseBody = outputStream -> {
             ragService.chatStream(request)
+                    .onErrorResume(error -> {
+                        log.error("Streaming failed", error);
+                        return Flux.just(
+                                "data: {\"error\":\"INTERNAL_ERROR\"}\n\n",
+                                "data: [DONE]\n\n"
+                        );
+                    })
                     .doOnNext(chunk -> {
                         try {
-                            outputStream.write(chunk.getBytes(StandardCharsets.UTF_8));
-                            outputStream.flush();
+                            response.getOutputStream().write(chunk.getBytes(StandardCharsets.UTF_8));
+                            response.getOutputStream().flush();
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
                     })
-                    .doOnError(error -> {
-                        try {
-                            outputStream.write("data: {\"error\":\"INTERNAL_ERROR\"}\n\ndata: [DONE]\n\n".getBytes());
-                            outputStream.flush();
-                        } catch (IOException ignored) {}
-                    })
                     .blockLast();
-        };
+            return;
+        }
 
-        return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_EVENT_STREAM)
-                .body(responseBody);
+        ChatCompletionResponse chatResponse = ragService.chat(request);
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        objectMapper.writeValue(response.getOutputStream(), chatResponse);
     }
 }
